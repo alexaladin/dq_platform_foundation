@@ -1,0 +1,32 @@
+suggestions:
+  key_detection:
+    enabled: true
+    max_candidates: 3
+    min_non_null: 1000
+    null_pct_max: 0.02
+    distinct_ratio_min: 0.999
+
+    allow_near_unique: true
+    near_unique:
+      max_duplicates: 5
+      max_duplicate_rate: 0.00001
+
+    use_name_hints: true
+    name_hints:
+      positive_patterns: ["(^|_)id$", "uuid", "guid", "surrogate", "key"]
+      negative_patterns: ["date", "dt", "ts", "status", "type", "code"]
+
+    allow_composite: true
+    composite:
+      max_columns: 2
+      top_k_single_candidates: 5
+
+    scoring:
+      weights:
+        exact_unique: 0.6
+        distinct_ratio: 0.2
+        low_nulls: 0.1
+        positive_name_hint: 0.1
+        negative_name_hint: -0.2
+      floors:
+        min_confidence_to_return: 0.55

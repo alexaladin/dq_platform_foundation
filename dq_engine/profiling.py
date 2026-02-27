@@ -18,15 +18,24 @@ def profile_df(df: pd.DataFrame, max_top: int = 10) -> Dict[str, Any]:
         else:
             nulls = int(s.isna().sum())
 
-        distinct = int(s.nunique(dropna=True))
         top = s.value_counts(dropna=True).head(max_top).to_dict()
+
+        non_null_count = n - nulls
+        distinct_count = int(s.nunique(dropna=True))
+        distinct_ratio_non_null = distinct_count / non_null_count
+        max_dup_count = int(s.value_counts().max())
+        duplicate_count = non_null_count - distinct_count
 
         col_prof: Dict[str, Any] = {
             "dtype": str(s.dtype),
             "null_count": nulls,
-            "null_pct": (nulls / n * 100.0) if n else 0.0,
-            "distinct": distinct,
+            "null_pct": float(nulls / n) if n else 0.0,
+            "distinct_count": distinct_count,
             "top_values": top,
+            "non_null_count": int(non_null_count),
+            "distinct_ratio_non_null": float(distinct_ratio_non_null),
+            "max_dup_count": max_dup_count,
+            "duplicate_count": duplicate_count
         }
 
         # numeric stats (safe for extension dtypes)
