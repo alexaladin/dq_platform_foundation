@@ -1,0 +1,15 @@
+notifications:
+  teams:
+    enabled: false
+    webhook_url: ""   # set for real Teams channel
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    from: ""
+    to_default: []
+  azure_devops:
+    enabled: false
+    org_url: ""
+    project: ""
+    pat: ""           # use env var in real usage

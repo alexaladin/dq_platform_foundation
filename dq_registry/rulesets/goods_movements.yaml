@@ -1,0 +1,90 @@
+dataset_id: goods_movements
+ruleset_version: 1
+owner_team: SupplyChain
+data_owner: owner@example.com
+rules:
+- rule_id: G001_schema_presence
+  rule_type: schema
+  severity: critical
+  expectation:
+    required_columns:
+    - movement_id
+    - material_id
+    - quantity
+    - movement_type
+    - plant
+    - movement_date
+    - ts_load
+- rule_id: G002_movement_id_unique
+  rule_type: uniqueness
+  severity: critical
+  expectation:
+    column: movement_id
+    max_duplicates_allowed: 0
+- rule_id: G003_movement_id_not_null
+  rule_type: completeness
+  severity: critical
+  expectation:
+    column: movement_id
+    max_null_percent: 0
+- rule_id: G003_material_id_not_null
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: material_id
+    max_null_percent: 0
+- rule_id: G003_movement_type_not_null
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_type
+    max_null_percent: 0
+- rule_id: G003_plant_not_null
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: plant
+    max_null_percent: 0
+- rule_id: G003_movement_date_not_null
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_date
+    max_null_percent: 0
+- rule_id: G010_quantity_non_negative
+  rule_type: range
+  severity: high
+  expectation:
+    column: quantity
+    min: 0
+    max: null
+- rule_id: G011_movement_type_domain
+  rule_type: domain
+  severity: high
+  expectation:
+    column: movement_type
+    allowed_values:
+    - RECEIPT
+    - ISSUE
+    - TRANSFER
+    - MOVE
+- rule_id: G012_movement_date_not_future
+  rule_type: date_not_in_future
+  severity: medium
+  expectation:
+    column: movement_date
+- rule_id: G003_dataset_is_fresh
+  rule_type: freshness
+  severity: critical
+  expectation:
+    column: ts_load
+    max_age_days: 1
+    timezone: UTC
+- rule_id: X001_material_fk_exists
+  rule_type: referential_integrity
+  severity: critical
+  expectation:
+    child_dataset: goods_movements
+    child_column: material_id
+    parent_dataset: materials_master
+    parent_column: material_id

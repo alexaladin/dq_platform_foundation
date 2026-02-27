@@ -1,0 +1,23 @@
+datasets:
+  - dataset_id: materials_master
+    source_type: csv
+    source_location: data/raw/materials_master.csv
+    owner_team: SupplyChain
+    data_owner: owner@example.com
+    sla_tier: gold
+
+  - dataset_id: goods_movements
+    source_type: csv
+    source_location: data/raw/goods_movements.csv
+    owner_team: SupplyChain
+    data_owner: owner@example.com
+    sla_tier: gold
+
+  - dataset_id: invent_location
+    source_type: csv
+    source_location: data/raw/invent_location.csv
+    owner_team: SupplyChain
+    data_owner: owner@example.com
+    sla_tier: gold
+
+

@@ -1,0 +1,17 @@
+severity_policy:
+  critical:
+    stop_pipeline: true
+    notify_channels: [teams, email, ado]
+    create_ado_task: true
+  high:
+    stop_pipeline: false
+    notify_channels: [teams, email]
+    create_ado_task: false
+  medium:
+    stop_pipeline: false
+    notify_channels: [teams]
+    create_ado_task: false
+  low:
+    stop_pipeline: false
+    notify_channels: []
+    create_ado_task: false

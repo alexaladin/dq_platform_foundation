@@ -1,0 +1,70 @@
+dataset_id: materials_master
+ruleset_version: 1
+owner_team: SupplyChain
+data_owner: owner@example.com
+rules:
+- rule_id: M001_schema_presence
+  rule_type: schema
+  severity: critical
+  expectation:
+    required_columns:
+    - material_id
+    - material_name
+    - unit_of_measure
+    - weight
+    - created_at
+    - ts_load
+- rule_id: M002_pk_unique
+  rule_type: uniqueness
+  severity: critical
+  expectation:
+    column: material_id
+    max_duplicates_allowed: 0
+- rule_id: M003_material_id_not_null
+  rule_type: completeness
+  severity: critical
+  expectation:
+    column: material_id
+    max_null_percent: 0
+- rule_id: M003_material_name_not_null
+  rule_type: completeness
+  severity: critical
+  expectation:
+    column: material_name
+    max_null_percent: 0
+- rule_id: M003_unit_of_measure_not_null
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: unit_of_measure
+    max_null_percent: 0
+- rule_id: M010_uom_domain
+  rule_type: domain
+  severity: high
+  expectation:
+    column: unit_of_measure
+    allowed_values:
+    - kg
+    - m
+    - g
+    - l
+    - pcs
+- rule_id: M011_weight_range
+  rule_type: range
+  severity: high
+  expectation:
+    column: weight
+    min: 0
+    max: 114.24
+- rule_id: M012_created_at_not_future
+  rule_type: date_not_in_future
+  severity: medium
+  expectation:
+    column: created_at
+- rule_id: M003_dataset_is_fresh
+  rule_type: freshness
+  severity: critical
+  expectation:
+    column: ts_load
+    max_age_days: 2
+    timezone: UTC
