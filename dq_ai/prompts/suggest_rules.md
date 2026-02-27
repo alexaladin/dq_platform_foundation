@@ -45,4 +45,3 @@ RULE RULES:
 \- rule\_id must be unique and descriptive
 
 \- Prefer fewer high-value rules over many trivial ones
-

@@ -1,13 +1,18 @@
-import os, json
+import os
+
+# import json
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
-from .provider_base import AIProvider, SuggestRulesResponse, ExplainAnomalyResponse, DetectDriftResponse
+
+from .provider_base import AIProvider
+
+# , SuggestRulesResponse, ExplainAnomalyResponse, DetectDriftResponse)
+
 
 class FoundryAgentProvider(AIProvider):
     def __init__(self, agent_id: str):
         self.client = AIProjectClient(
-            endpoint=os.environ["PROJECT_ENDPOINT"],
-            credential=DefaultAzureCredential()
+            endpoint=os.environ["PROJECT_ENDPOINT"], credential=DefaultAzureCredential()
         )
         self.agent_id = agent_id
 
@@ -26,19 +31,22 @@ class FoundryAgentProvider(AIProvider):
         return assistant.content[0].text.value if assistant.content else ""
 
     def suggest_rules(self, dataset_id, profiling, existing_ruleset_yaml=None):
-        prompt = build_prompt_suggest_rules(dataset_id, profiling, existing_ruleset_yaml)
-        txt = self._ask_agent(prompt)
+        # prompt = build_prompt_suggest_rules(dataset_id, profiling, existing_ruleset_yaml)
+        # txt = self._ask_agent(prompt)
         # expectation: YAML + short rationale (or JSON)
-        return SuggestRulesResponse(ruleset_yaml=extract_yaml(txt), rationale=extract_rationale(txt))
+        # return SuggestRulesResponse(ruleset_yaml=extract_yaml(txt), rationale=extract_rationale(txt))
+        pass
 
     def explain_anomaly(self, dataset_id, dq_failures, profiling):
-        prompt = build_prompt_explain(dataset_id, dq_failures, profiling)
-        txt = self._ask_agent(prompt)
-        obj = json.loads(extract_json(txt))
-        return ExplainAnomalyResponse(**obj)
+        # prompt = build_prompt_explain(dataset_id, dq_failures, profiling)
+        # txt = self._ask_agent(prompt)
+        # obj = json.loads(extract_json(txt))
+        # return ExplainAnomalyResponse(**obj)
+        pass
 
     def detect_drift(self, dataset_id, profiling_now, profiling_baseline):
-        prompt = build_prompt_drift(dataset_id, profiling_now, profiling_baseline)
-        txt = self._ask_agent(prompt)
-        obj = json.loads(extract_json(txt))
-        return DetectDriftResponse(**obj)
+        # prompt = build_prompt_drift(dataset_id, profiling_now, profiling_baseline)
+        # txt = self._ask_agent(prompt)
+        # obj = json.loads(extract_json(txt))
+        # return DetectDriftResponse(**obj)
+        pass

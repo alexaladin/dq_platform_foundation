@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import asdict, dataclass
+from typing import Any
 
 
-def _match_any(patterns: List[str], s: str) -> List[str]:
+def _match_any(patterns: list[str], s: str) -> list[str]:
     hits = []
     for p in patterns or []:
         if re.search(p, s, flags=re.IGNORECASE):
@@ -25,50 +25,54 @@ class KeyEvidence:
     distinct_count: int
     distinct_ratio_non_null: float
     duplicate_count: int
-    max_dup_count: Optional[int]
-    name_signals: Dict[str, List[str]]
+    max_dup_count: int | None
+    name_signals: dict[str, list[str]]
 
 
 @dataclass
 class KeyCandidate:
     candidate_type: str  # "single"
-    columns: List[str]
+    columns: list[str]
     confidence: float
     evidence: KeyEvidence
-    recommended_rules: List[Dict[str, Any]]
-    notes: List[str]
+    recommended_rules: list[dict[str, Any]]
+    notes: list[str]
 
 
 def _compute_confidence_single(
-        col_name: str,
-        col_prof: Dict[str, Any],
-        kd: Dict[str, Any],
-) -> Tuple[float, Dict[str, List[str]], List[str]]:
+    col_name: str,
+    col_prof: dict[str, Any],
+    kd: dict[str, Any],
+) -> tuple[float, dict[str, list[str]], list[str]]:
     weights = (kd.get("scoring", {}) or {}).get("weights", {}) or {}
     floors = (kd.get("scoring", {}) or {}).get("floors", {}) or {}
 
-    null_pct = float(col_prof.get("null_pct", 1.0))  # ожидаем 0..1
-    non_null = int(col_prof.get("non_null_count", 0))
+    null_pct = float(col_prof.get("null_pct", 1.0))  # ожидаем 0..1 # 0
+    non_null = int(col_prof.get("non_null_count", 0))  # 11
     distinct = int(col_prof.get("distinct_count", col_prof.get("distinct", 0)))
-
+    # 10
     dr = col_prof.get("distinct_ratio_non_null")
     if dr is None:
         dr = (distinct / non_null) if non_null > 0 else 0.0
     dr = float(dr)
 
-    dup_count = max(0, non_null - distinct)
-    max_dup_count = col_prof.get("max_dup_count")
+    dup_count = max(0, non_null - distinct)  # 11 - 10 = 1
+    max_dup_count = col_prof.get("max_dup_count")  # 2
 
     # Name hints
     name_hints = kd.get("name_hints", {}) or {}
     use_name_hints = bool(kd.get("use_name_hints", True))
-    pos_hits = _match_any(name_hints.get("positive_patterns", []), col_name) if use_name_hints else []
-    neg_hits = _match_any(name_hints.get("negative_patterns", []), col_name) if use_name_hints else []
+    pos_hits = (
+        _match_any(name_hints.get("positive_patterns", []), col_name) if use_name_hints else []
+    )
+    neg_hits = (
+        _match_any(name_hints.get("negative_patterns", []), col_name) if use_name_hints else []
+    )
     name_signals = {"positive": pos_hits, "negative": neg_hits}
 
-    notes: List[str] = []
+    notes: list[str] = []
 
-    exact_unique = (dup_count == 0)
+    exact_unique = dup_count == 0
     distinct_ratio_min = float(kd.get("distinct_ratio_min", 0.999))
     null_pct_max = float(kd.get("null_pct_max", 0.02))
 
@@ -79,15 +83,16 @@ def _compute_confidence_single(
 
     dup_rate = (dup_count / non_null) if non_null > 0 else 1.0
     near_unique_ok = (
-            allow_near_unique
-            and (dup_count <= max_duplicates if max_duplicates > 0 else True)
-            and (dup_rate <= max_duplicate_rate if max_duplicate_rate > 0 else True)
+        allow_near_unique
+        and (dup_count <= max_duplicates if max_duplicates > 0 else True)
+        and (dup_rate <= max_duplicate_rate if max_duplicate_rate > 0 else True)
     )
-
+    print(dup_rate, max_duplicate_rate, near_unique_ok)
     score = 0.0
     if exact_unique:
         score += float(weights.get("exact_unique", 0.6))
     elif near_unique_ok:
+        score += float(weights.get("near_unique", 0.4))
         notes.append("near-unique (within near-unique thresholds)")
     else:
         notes.append("duplicates exceed near-unique thresholds")
@@ -109,38 +114,40 @@ def _compute_confidence_single(
 
     score = _clamp(score, 0.0, 1.0)
 
-    min_conf = float((floors.get("min_confidence_to_return", 0.0)))
+    min_conf = float(floors.get("min_confidence_to_return", 0.0))
     if score < min_conf:
         notes.append(f"below min_confidence_to_return ({min_conf})")
 
     if max_dup_count is not None and int(max_dup_count) > 1:
         notes.append(f"max_dup_count={int(max_dup_count)}")
-
+    print(1111, score, name_signals, notes)
     return score, name_signals, notes
 
 
 def suggest_key_candidates(
-        profile: Dict[str, Any],
-        dq_standards: Dict[str, Any],
-        existing_rules: Optional[List[Dict[str, Any]]] = None,
-) -> List[Dict[str, Any]]:
+    profile: dict[str, Any],
+    dq_standards: dict[str, Any],
+    existing_rules: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     existing_rules = existing_rules or []
 
-    kd = (((dq_standards.get("suggestions") or {}).get("key_detection")) or {})
+    kd = ((dq_standards.get("suggestions") or {}).get("key_detection")) or {}
     if not kd or not kd.get("enabled", True):
         return []
 
     row_count = int(profile.get("row_count", 0))
-    cols = (profile.get("columns") or {})
+    cols = profile.get("columns") or {}
 
     max_candidates = int(kd.get("max_candidates", 3))
     min_non_null = int(kd.get("min_non_null", 0))
     null_pct_max = float(kd.get("null_pct_max", 0.02))
     distinct_ratio_min = float(kd.get("distinct_ratio_min", 0.999))
-    min_conf = float(((kd.get("scoring", {}) or {}).get("floors", {}) or {}).get("min_confidence_to_return", 0.0))
+    min_conf = float(
+        ((kd.get("scoring", {}) or {}).get("floors", {}) or {}).get("min_confidence_to_return", 0.0)
+    )
 
     # Candidate pool filter
-    pool: List[Tuple[str, Dict[str, Any]]] = []
+    pool: list[tuple[str, dict[str, Any]]] = []
     for c, cp in cols.items():
         non_null = int(cp.get("non_null_count", 0))
         null_pct = float(cp.get("null_pct", 1.0))
@@ -154,13 +161,19 @@ def suggest_key_candidates(
             continue
         if null_pct > null_pct_max:
             continue
+
+        near_cfg = kd.get("near_unique", {}) or {}
+        near_dr_min = float(near_cfg.get("distinct_ratio_min", distinct_ratio_min))
+        allow_near = bool(kd.get("allow_near_unique", True))
+
         if dr < distinct_ratio_min:
-            continue
+            #  если не проходит строгий порог, то может пройти как near-unique
+            if not allow_near or dr < near_dr_min:
+                continue
 
         pool.append((c, cp))
 
-    candidates: List[KeyCandidate] = []
-
+    candidates: list[KeyCandidate] = []
     for col_name, col_prof in pool:
         conf, name_signals, notes = _compute_confidence_single(col_name, col_prof, kd)
         if conf < min_conf:
@@ -201,5 +214,7 @@ def suggest_key_candidates(
             )
         )
 
-    candidates_sorted = sorted(candidates, key=lambda x: x.confidence, reverse=True)[:max_candidates]
+    candidates_sorted = sorted(candidates, key=lambda x: x.confidence, reverse=True)[
+        :max_candidates
+    ]
     return [asdict(c) for c in candidates_sorted]

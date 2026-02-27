@@ -19,5 +19,3 @@ datasets:
     owner_team: SupplyChain
     data_owner: owner@example.com
     sla_tier: gold
-
-
