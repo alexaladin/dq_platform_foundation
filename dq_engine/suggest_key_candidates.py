@@ -87,7 +87,7 @@ def _compute_confidence_single(
         and (dup_count <= max_duplicates if max_duplicates > 0 else True)
         and (dup_rate <= max_duplicate_rate if max_duplicate_rate > 0 else True)
     )
-    print(dup_rate, max_duplicate_rate, near_unique_ok)
+
     score = 0.0
     if exact_unique:
         score += float(weights.get("exact_unique", 0.6))
@@ -120,7 +120,6 @@ def _compute_confidence_single(
 
     if max_dup_count is not None and int(max_dup_count) > 1:
         notes.append(f"max_dup_count={int(max_dup_count)}")
-    print(1111, score, name_signals, notes)
     return score, name_signals, notes
 
 
@@ -139,7 +138,8 @@ def suggest_key_candidates(
     cols = profile.get("columns") or {}
 
     max_candidates = int(kd.get("max_candidates", 3))
-    min_non_null = int(kd.get("min_non_null", 0))
+    # min_non_null = int(kd.get("min_non_null", 0))
+    min_non_null = row_count * float(kd.get("distinct_ratio_min", 0.999))
     null_pct_max = float(kd.get("null_pct_max", 0.02))
     distinct_ratio_min = float(kd.get("distinct_ratio_min", 0.999))
     min_conf = float(
@@ -165,14 +165,12 @@ def suggest_key_candidates(
         near_cfg = kd.get("near_unique", {}) or {}
         near_dr_min = float(near_cfg.get("distinct_ratio_min", distinct_ratio_min))
         allow_near = bool(kd.get("allow_near_unique", True))
-
         if dr < distinct_ratio_min:
             #  если не проходит строгий порог, то может пройти как near-unique
             if not allow_near or dr < near_dr_min:
                 continue
 
         pool.append((c, cp))
-
     candidates: list[KeyCandidate] = []
     for col_name, col_prof in pool:
         conf, name_signals, notes = _compute_confidence_single(col_name, col_prof, kd)

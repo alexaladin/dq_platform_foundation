@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -10,11 +9,6 @@ import yaml
 
 from dq_ai.provider_mock import MockAIProvider
 from dq_engine.profiling import profile_df
-
-# Add project root to PYTHONPATH
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
-
 
 ALLOWED_RULE_TYPES = [
     "schema",

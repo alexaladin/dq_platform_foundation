@@ -4,13 +4,13 @@ suggestions:
     max_candidates: 3
     min_non_null: 1000
     null_pct_max: 0.02
-    distinct_ratio_min: 0.999
+    distinct_ratio_min: 0.85
 
     allow_near_unique: true
     near_unique:
-      max_duplicates: 5
-      max_duplicate_rate: 0.00001
-      distinct_ratio_min: 0.95
+      max_duplicates: 5000
+      max_duplicate_rate: 0.05
+      distinct_ratio_min: 0.75
 
     use_name_hints: true
     name_hints:
