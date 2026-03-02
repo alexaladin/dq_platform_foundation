@@ -9,17 +9,6 @@ rules:
   expectation:
     column: material_id
     max_null_percent: 0
-- rule_id: SUG_invent_location_unit_of_measure_domain
-  rule_type: domain
-  severity: high
-  expectation:
-    column: unit_of_measure
-    allowed_values:
-    - kg
-    - m
-    - g
-    - l
-    - pcs
 - rule_id: SUG_invent_location_weight_not_null
   rule_type: completeness
   severity: medium
@@ -32,3 +21,45 @@ rules:
   expectation:
     column: created_at
     max_null_percent: 0
+- rule_id: uniqueness_0004
+  type: uniqueness
+  columns:
+  - material_id
+  severity: high
+  description: Suggested from key candidate profiling (policy-driven)
+  suggested_by: key_detection_engine
+- rule_id: completeness_0005
+  type: completeness
+  columns:
+  - material_id
+  severity: high
+  description: Suggested from key candidate profiling (policy-driven)
+  suggested_by: key_detection_engine
+- rule_id: uniqueness_0006
+  type: uniqueness
+  columns:
+  - weight
+  severity: high
+  description: Suggested from key candidate profiling (policy-driven)
+  suggested_by: key_detection_engine
+- rule_id: completeness_0007
+  type: completeness
+  columns:
+  - weight
+  severity: high
+  description: Suggested from key candidate profiling (policy-driven)
+  suggested_by: key_detection_engine
+- rule_id: uniqueness_0008
+  type: uniqueness
+  columns:
+  - material_name
+  severity: high
+  description: Suggested from key candidate profiling (policy-driven)
+  suggested_by: key_detection_engine
+- rule_id: completeness_0009
+  type: completeness
+  columns:
+  - material_name
+  severity: high
+  description: Suggested from key candidate profiling (policy-driven)
+  suggested_by: key_detection_engine

@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional, List
+
+from typing import Any
 
 from .provider_base import AIProvider, SuggestRulesResponse
 
@@ -11,14 +12,21 @@ class MockAIProvider(AIProvider):
     """
 
     def suggest_rules(
-            self,
-            dataset_id: str,
-            profiling: Dict[str, Any],
-            existing_ruleset_yaml: Optional[str] = None,
-            allowed_rule_types: Optional[List[str]] = None,
+        self,
+        dataset_id: str,
+        profiling: dict[str, Any],
+        existing_ruleset_yaml: str | None = None,
+        allowed_rule_types: list[str] | None = None,
     ) -> SuggestRulesResponse:
-
-        allowed_rule_types = allowed_rule_types or ["schema", "completeness", "uniqueness", "domain", "range", "date_not_in_future", "freshness"]
+        allowed_rule_types = allowed_rule_types or [
+            "schema",
+            "completeness",
+            "uniqueness",
+            "domain",
+            "range",
+            "date_not_in_future",
+            "freshness",
+        ]
 
         cols = profiling["columns"]
         row_count = profiling["row_count"]
@@ -32,34 +40,48 @@ class MockAIProvider(AIProvider):
             null_pct = float(meta.get("null_pct", 0.0))
 
             if "domain" in allowed_rule_types and 1 < distinct <= 10 and len(top_values) > 0:
-                rules.append({
-                    "rule_id": f"SUG_{dataset_id}_{col}_domain",
-                    "rule_type": "domain",
-                    "severity": "high",
-                    "expectation": {"column": col, "allowed_values": top_values[:10]}
-                })
+                rules.append(
+                    {
+                        "rule_id": f"SUG_{dataset_id}_{col}_domain",
+                        "rule_type": "domain",
+                        "severity": "high",
+                        "expectation": {
+                            "column": col,
+                            "allowed_values": top_values[:10],
+                        },
+                    }
+                )
 
-            if "completeness" in allowed_rule_types and null_pct == 0.0 and col.lower() != "ts_load":
-                rules.append({
-                    "rule_id": f"SUG_{dataset_id}_{col}_not_null",
-                    "rule_type": "completeness",
-                    "severity": "medium",
-                    "expectation": {"column": col, "max_null_percent": 0}
-                })
+            if (
+                "completeness" in allowed_rule_types
+                and null_pct == 0.0
+                and col.lower() != "ts_load"
+            ):
+                rules.append(
+                    {
+                        "rule_id": f"SUG_{dataset_id}_{col}_not_null",
+                        "rule_type": "completeness",
+                        "severity": "medium",
+                        "expectation": {"column": col, "max_null_percent": 0},
+                    }
+                )
 
             if "uniqueness" in allowed_rule_types and distinct == row_count and row_count > 0:
-                rules.append({
-                    "rule_id": f"SUG_{dataset_id}_{col}_unique",
-                    "rule_type": "uniqueness",
-                    "severity": "high",
-                    "expectation": {"column": col, "max_duplicates_allowed": 0}
-                })
+                rules.append(
+                    {
+                        "rule_id": f"SUG_{dataset_id}_{col}_unique",
+                        "rule_type": "uniqueness",
+                        "severity": "high",
+                        "expectation": {"column": col, "max_duplicates_allowed": 0},
+                    }
+                )
 
         # Build a YAML ruleset (candidate)
         import yaml
+
         ruleset = {
             "dataset_id": dataset_id,
-            "ruleset_version": 999,   # caller will overwrite
+            "ruleset_version": 999,  # caller will overwrite
             "owner_team": "UNKNOWN",
             "data_owner": "UNKNOWN",
             "rules": rules[:25],
