@@ -1,0 +1,78 @@
+dataset_id: goods_movements
+ruleset_version: 1
+owner_team: SupplyChain
+data_owner: owner@example.com
+rules:
+- rule_id: U001
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: movement_id
+  suggested_by: key_detection_engine
+- rule_id: C001
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_id
+  suggested_by: key_detection_engine
+- rule_id: U002
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: movement_id
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Each movement should have a unique identifier.
+  ai_evidence_used:
+    distinct_count: 500
+    duplicate_count: 0
+- rule_id: C002
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_id
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Movement ID is critical for identifying each record and should not
+    be null.
+  ai_evidence_used:
+    null_pct: 0.0
+- rule_id: D001
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: movement_type
+    allowed_values:
+    - type1
+    - type2
+    - type3
+    - type4
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: Movement type should be one of the predefined categories.
+  ai_evidence_used:
+    distinct_count: 4
+- rule_id: D002
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: plant
+    allowed_values:
+    - plant1
+    - plant2
+    - plant3
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: Plant should be one of the predefined locations.
+  ai_evidence_used:
+    distinct_count: 3
+- rule_id: T001
+  rule_type: date_not_in_future
+  severity: medium
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 0.9
+  ai_rationale: Movement date should not be in the future.
+  ai_evidence_used:
+    distinct_count: 57

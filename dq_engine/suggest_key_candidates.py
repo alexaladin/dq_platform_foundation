@@ -197,8 +197,8 @@ def suggest_key_candidates(
         )
 
         recommended = [
-            {"type": "uniqueness", "columns": [col_name], "severity": "high"},
-            {"type": "completeness", "columns": [col_name], "severity": "high"},
+            {"rule_type": "uniqueness", "columns": [col_name], "severity": "high"},
+            {"rule_type": "completeness", "columns": [col_name], "severity": "high"},
         ]
 
         candidates.append(

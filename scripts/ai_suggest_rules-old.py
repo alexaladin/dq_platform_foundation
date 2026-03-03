@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -104,7 +104,7 @@ def main():
     # Save raw AI output (for audit)
     out_ai = root / "dq_results" / "ai_suggestions"
     out_ai.mkdir(parents=True, exist_ok=True)
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     (out_ai / f"{ts}__{dataset_id}__suggest_rules_raw.yaml").write_text(
         resp.ruleset_yaml, encoding="utf-8"
     )

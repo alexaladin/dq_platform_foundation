@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
 
+from dq_ai.provider_azure_openai import AzureOpenAIProvider
 from dq_ai.provider_mock import MockAIProvider
+from dq_engine.ai_patch_guardrails import validate_and_filter_ai_rules
 from dq_engine.profiling import profile_df
+from dq_engine.rules_merge import merge_rules_to_add
 from dq_engine.suggest_key_candidates import suggest_key_candidates
 
 ALLOWED_RULE_TYPES = [
@@ -37,29 +41,6 @@ def next_ruleset_version(existing_yaml: str | None) -> int:
     return int(doc.get("ruleset_version", 1)) + 1
 
 
-def apply_suggestion_to_yaml(existing_yaml: str | None, suggestion_json: dict) -> str:
-    if existing_yaml:
-        doc = yaml.safe_load(existing_yaml)
-    else:
-        doc = {
-            "dataset_id": suggestion_json["dataset_id"],
-            "ruleset_version": 1,
-            "owner_team": "UNKNOWN",
-            "data_owner": "UNKNOWN",
-            "rules": [],
-        }
-
-    doc["ruleset_version"] = suggestion_json["ruleset_version"]
-
-    existing_rule_ids = {r["rule_id"] for r in doc.get("rules", [])}
-    for r in suggestion_json.get("rules_to_add", []):
-        if r["rule_id"] in existing_rule_ids:
-            continue
-        doc["rules"].append(r)
-
-    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
-
-
 def _load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
@@ -68,133 +49,67 @@ def _load_standards(root: Path) -> dict:
     return _load_yaml(root / "config" / "dq_standards.yaml")
 
 
-def _flatten_key_candidate_rules(key_candidates: list[dict]) -> list[dict]:
-    rules: list[dict] = []
-    for c in key_candidates:
-        rules.extend(c.get("recommended_rules") or [])
-    return rules
-
-
-def _next_rule_id(existing_rules: list[dict], prefix: str = "rule") -> str:
+def _ensure_schema_ts_load(suggested_doc: dict, standards: dict) -> None:
     """
-    Generate a new rule_id that doesn't collide with existing ones.
-    Uses a simple monotonically increasing suffix based on already-present rule_ids.
+    Optional platform baseline schema rule. Keep simple:
+    - If standards says enforce_ts_load_in_schema: add schema rule requiring ts_load
+    - If schema rule already exists: do nothing
     """
-    existing_ids = {r.get("rule_id") for r in existing_rules if isinstance(r, dict)}
-    n = len(existing_ids) + 1
-    while True:
-        rid = f"{prefix}_{n:04d}"
-        if rid not in existing_ids:
-            return rid
-        n += 1
-
-
-def _ensure_schema_has_ts_load_rule(
-    dataset_id: str, suggested_doc: dict, standards: dict, profiling: dict
-) -> None:
-    """
-    If standards enforce ts_load, add a schema rule requiring ts_load in dataframe columns.
-    This is deterministic (policy-driven), not AI.
-    """
-    enforce = (
-        (standards.get("enforce_ts_load_in_schema"))
-        or (standards.get("schema", {}) or {}).get("enforce_ts_load_in_schema")
-        or ((standards.get("platform_baseline", {}) or {}).get("enforce_ts_load_in_schema"))
+    enforce = bool(
+        (standards.get("enforce_ts_load_in_schema") is True)
+        or ((standards.get("platform_baseline") or {}).get("enforce_ts_load_in_schema") is True)
+        or ((standards.get("schema") or {}).get("enforce_ts_load_in_schema") is True)
     )
     if not enforce:
         return
 
     ts_col = (standards.get("ts_load_column") or "ts_load").strip()
-    # cols = set((profiling.get("columns") or {}).keys())
-    # If dataset doesn't even have ts_load, schema rule still makes sense (will fail),
-    # but you may choose to only add if column exists. Here we enforce requirement anyway.
+
     rules = suggested_doc.setdefault("rules", [])
-    if any(r.get("type") == "schema" for r in rules):
-        # We don't try to merge/modify existing schema rules here (keep it simple).
+    if any(isinstance(r, dict) and r.get("rule_type") == "schema" for r in rules):
         return
 
-    rid = _next_rule_id(rules, prefix="schema")
-    schema_rule = {
-        "rule_id": rid,
-        "type": "schema",
-        "required_columns": [ts_col],
-        "severity": "high",
-        "description": f"Platform baseline: require {ts_col} column",
-    }
-    rules.append(schema_rule)
-
-
-def _inject_key_validation_suggestions(
-    dataset_id: str, suggested_doc: dict, standards: dict, profiling: dict
-) -> dict:
-    """
-    Generate key-candidate-based validations (uniqueness/completeness) and add them into
-    suggested_doc.rules as deterministic, policy-driven suggestions.
-    Returns an artifacts dict to save for audit.
-    """
-    rules = suggested_doc.setdefault("rules", [])
-    existing_rule_ids = {r.get("rule_id") for r in rules if isinstance(r, dict)}
-
-    # Also dedupe by logical signature (type + columns) to avoid repeats
-    existing_signatures = set()
-    for r in rules:
-        if not isinstance(r, dict):
-            continue
-        rtype = r.get("type")
-        cols = tuple(r.get("columns") or [])
-        existing_signatures.add((rtype, cols))
-
-    key_candidates = suggest_key_candidates(profiling, standards, existing_rules=rules)
-    key_rules = _flatten_key_candidate_rules(key_candidates)
-
-    added = 0
-    skipped = 0
-    for r in key_rules:
-        # r is expected to be {"type": "...", "columns": [...], "severity": "..."}
-        rtype = r.get("type")
-        cols = r.get("columns") or []
-        sig = (rtype, tuple(cols))
-        if sig in existing_signatures:
-            skipped += 1
-            continue
-
-        rid = _next_rule_id(rules, prefix=rtype or "rule")
-        rule_obj = {
-            "rule_id": rid,
-            "type": rtype,
-            "columns": cols,
-            "severity": r.get("severity", "high"),
-            "description": "Suggested from key candidate profiling (policy-driven)",
-            "suggested_by": "key_detection_engine",
+    # Minimal schema rule contract
+    rules.append(
+        {
+            "rule_id": "schema_0001",  # will be unique for new rulesets; if existing ruleset, schema exists already
+            "rule_type": "schema",
+            "required_columns": [ts_col],
+            "severity": "high",
+            "description": f"Platform baseline: require {ts_col}",
+            "suggested_by": "platform_baseline",
         }
+    )
 
-        # Safety: only include known rule types
-        if rtype not in ALLOWED_RULE_TYPES:
-            skipped += 1
-            continue
 
-        # Dedupe by id just in case
-        if rid in existing_rule_ids:
-            skipped += 1
-            continue
+def _add_key_validation_suggestions(suggested_doc: dict, standards: dict, profiling: dict) -> dict:
+    """
+    Adds uniqueness + completeness for top-N key candidates (policy-driven).
+    """
+    key_candidates = suggest_key_candidates(
+        profiling, standards, existing_rules=suggested_doc.get("rules", [])
+    )
+    key_rules = []
+    for c in key_candidates:
+        key_rules.extend(c.get("recommended_rules") or [])
 
-        rules.append(rule_obj)
-        existing_rule_ids.add(rid)
-        existing_signatures.add(sig)
-        added += 1
-
-    return {
-        "dataset_id": dataset_id,
-        "key_candidates": key_candidates,
-        "key_rules_added": added,
-        "key_rules_skipped": skipped,
-    }
+    # Merge as deterministic rules (not AI)
+    merge_rules_to_add(
+        ruleset_doc=suggested_doc,
+        rules_to_add=key_rules,
+        suggested_by="key_detection_engine",
+        default_severity="high",
+    )
+    return {"key_candidates": key_candidates, "key_rules_count": len(key_rules)}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project_root", default=".")
     ap.add_argument("--dataset", required=True)
+    ap.add_argument("--ai", choices=["off", "mock", "azure"], default="off")
+    ap.add_argument("--max_ai_rules", type=int, default=15)
+    ap.add_argument("--min_ai_confidence", type=float, default=None)
     args = ap.parse_args()
 
     root = Path(args.project_root).resolve()
@@ -206,72 +121,153 @@ def main():
     df = pd.read_csv(root / ds_cfg["source_location"])
 
     profiling = profile_df(df)
+    dataset_columns = set((profiling.get("columns") or {}).keys())
 
     ruleset_path = root / "dq_registry" / "rulesets" / f"{dataset_id}.yaml"
     existing_yaml = read_existing_ruleset_yaml(ruleset_path)
 
-    provider = MockAIProvider()
-    resp = provider.suggest_rules(
-        dataset_id=dataset_id,
-        profiling=profiling,
-        existing_ruleset_yaml=existing_yaml,
-        allowed_rule_types=ALLOWED_RULE_TYPES,
-    )
+    # Start from existing ruleset OR minimal skeleton
+    if existing_yaml:
+        suggested_doc = yaml.safe_load(existing_yaml)
+    else:
+        suggested_doc = {
+            "dataset_id": dataset_id,
+            "ruleset_version": 1,
+            "owner_team": ds_cfg.get("owner_team", "UNKNOWN"),
+            "data_owner": ds_cfg.get("data_owner", "UNKNOWN"),
+            "rules": [],
+        }
 
-    # parse YAML returned by provider
-    suggested_doc = yaml.safe_load(resp.ruleset_yaml)
-
-    # set correct next version
+    # Increment version for suggested output
     suggested_doc["ruleset_version"] = next_ruleset_version(existing_yaml)
 
-    # If existing ruleset exists, keep owner fields (optional but useful)
-    if existing_yaml:
-        existing_doc = yaml.safe_load(existing_yaml)
-        suggested_doc["owner_team"] = existing_doc.get(
-            "owner_team", suggested_doc.get("owner_team")
-        )
-        suggested_doc["data_owner"] = existing_doc.get(
-            "data_owner", suggested_doc.get("data_owner")
-        )
-
-    # --- Deterministic, policy-driven validations additions ---
+    # --- Deterministic additions ---
     standards = _load_standards(root)
+    _ensure_schema_ts_load(suggested_doc, standards)
+    key_artifacts = _add_key_validation_suggestions(suggested_doc, standards, profiling)
 
-    # 1) Schema baseline (ts_load required), if configured
-    _ensure_schema_has_ts_load_rule(dataset_id, suggested_doc, standards, profiling)
-
-    # 2) Key-based validation suggestions (uniqueness + completeness) from profiling + standards
-    key_artifacts = _inject_key_validation_suggestions(
-        dataset_id, suggested_doc, standards, profiling
-    )
-
-    # Save raw AI output (for audit)
+    # --- AI patch-mode ---
     out_ai = root / "dq_results" / "ai_suggestions"
     out_ai.mkdir(parents=True, exist_ok=True)
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    (out_ai / f"{ts}__{dataset_id}__suggest_rules_raw.yaml").write_text(
-        resp.ruleset_yaml, encoding="utf-8"
-    )
-    (out_ai / f"{ts}__{dataset_id}__suggest_rules_rationale.txt").write_text(
-        resp.rationale, encoding="utf-8"
-    )
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    # Save deterministic artifacts for audit/review
-    (out_ai / f"{ts}__{dataset_id}__key_candidates.json").write_text(
-        json.dumps(key_artifacts, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    ai_artifacts: dict[str, Any] = {"enabled": args.ai, "accepted": 0, "rejected": 0}
 
-    # Save suggested ruleset YAML (merged: AI baseline + deterministic key/schema)
+    if args.ai != "off":
+        if args.ai == "mock":
+            provider = MockAIProvider()
+        else:
+            provider = AzureOpenAIProvider()
+
+        deterministic_context = {
+            "key_candidates": key_artifacts.get("key_candidates", []),
+            "platform_baseline": {
+                "schema_ts_load_enforced": bool(
+                    (standards.get("enforce_ts_load_in_schema") is True)
+                    or (
+                        (standards.get("platform_baseline") or {}).get("enforce_ts_load_in_schema")
+                        is True
+                    )
+                    or ((standards.get("schema") or {}).get("enforce_ts_load_in_schema") is True)
+                ),
+                "ts_load_column": standards.get("ts_load_column", "ts_load"),
+            },
+        }
+
+        # Save prompt input (audit)
+        prompt_input = {
+            "dataset_id": dataset_id,
+            "allowed_rule_types": ALLOWED_RULE_TYPES,
+            "max_rules_to_add": args.max_ai_rules,
+            "min_ai_confidence": args.min_ai_confidence,
+            "standards": standards.get("ai_patcher", standards),
+            "profiling": profiling,
+            "existing_ruleset_yaml": existing_yaml,
+            "deterministic_context": deterministic_context,
+        }
+        (out_ai / f"{ts}__{dataset_id}__ai_prompt_input.json").write_text(
+            json.dumps(prompt_input, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        ai_resp = provider.suggest_rules_patch(
+            dataset_id=dataset_id,
+            profiling=profiling,
+            standards=standards,
+            existing_ruleset_yaml=existing_yaml,
+            allowed_rule_types=ALLOWED_RULE_TYPES,
+            deterministic_context=deterministic_context,
+            max_rules_to_add=args.max_ai_rules,
+        )
+
+        # Save raw model output
+        (out_ai / f"{ts}__{dataset_id}__ai_patch_raw.json").write_text(
+            json.dumps(
+                {
+                    "dataset_id": dataset_id,
+                    "rationale": ai_resp.rationale,
+                    "rules_to_add": ai_resp.rules_to_add,
+                    "raw": ai_resp.raw,
+                    "model": ai_resp.model,
+                    "tokens_used": ai_resp.tokens_used,
+                    "latency_ms": ai_resp.latency_ms,
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        decision = validate_and_filter_ai_rules(
+            ai_rules=ai_resp.rules_to_add,
+            allowed_rule_types=ALLOWED_RULE_TYPES,
+            dataset_columns=dataset_columns,
+            existing_rules=suggested_doc.get("rules", []),
+            max_rules_to_add=args.max_ai_rules,
+            min_ai_confidence=args.min_ai_confidence,
+        )
+
+        (out_ai / f"{ts}__{dataset_id}__ai_patch_accepted.json").write_text(
+            json.dumps(decision.accepted, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (out_ai / f"{ts}__{dataset_id}__ai_patch_rejected.json").write_text(
+            json.dumps(decision.rejected, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        merge_rules_to_add(
+            ruleset_doc=suggested_doc,
+            rules_to_add=decision.accepted,
+            suggested_by="ai_patcher",
+            default_severity="medium",
+        )
+
+        ai_artifacts["accepted"] = len(decision.accepted)
+        ai_artifacts["rejected"] = len(decision.rejected)
+
+    # Save suggested ruleset YAML
     out_rules = root / "dq_registry" / "rulesets" / f"{dataset_id}.suggested.yaml"
     out_rules.write_text(
         yaml.safe_dump(suggested_doc, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
 
-    print("Wrote:", out_rules)
-    print(
-        f"Key suggestions: added={key_artifacts['key_rules_added']}, skipped={key_artifacts['key_rules_skipped']}"
+    # Save summary
+    summary = {
+        "dataset_id": dataset_id,
+        "ruleset_version": suggested_doc.get("ruleset_version"),
+        "key_candidates": len(key_artifacts.get("key_candidates", [])),
+        "ai": ai_artifacts,
+        "output_ruleset": str(out_rules),
+    }
+    (out_ai / f"{ts}__{dataset_id}__run_summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
+
+    print("Wrote:", out_rules)
+    print("Summary:", json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

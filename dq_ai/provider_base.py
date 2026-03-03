@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from abc import abstractmethod
 from typing import Any
 
+from dq_ai.types import AISuggestPatchResponse
 
-@dataclass
+
 class SuggestRulesResponse:
     ruleset_yaml: str
     rationale: str
 
 
-@dataclass
 class ExplainAnomalyResponse:
     summary: str
     likely_root_causes: list[str]
@@ -18,20 +18,29 @@ class ExplainAnomalyResponse:
     severity_suggestion: str
 
 
-@dataclass
 class DetectDriftResponse:
     drift_summary: str
     drift_signals: list[dict[str, Any]]
     recommended_rule_changes: list[dict[str, Any]]
 
 
-class AIProvider:
-    def suggest_rules(
+class AIProviderBase:
+    @abstractmethod
+    def suggest_rules_patch(
         self,
+        *,
         dataset_id: str,
         profiling: dict[str, Any],
-        existing_ruleset_yaml: str | None = None,
-    ) -> SuggestRulesResponse:
+        standards: dict[str, Any],
+        existing_ruleset_yaml: str | None,
+        allowed_rule_types: list[str],
+        deterministic_context: dict[str, Any],
+        max_rules_to_add: int = 15,
+    ) -> AISuggestPatchResponse:
+        """
+        Must return ONLY patch additions.
+        Must not modify existing rules.
+        """
         raise NotImplementedError
 
     def explain_anomaly(
