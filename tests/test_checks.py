@@ -101,7 +101,7 @@ def test_key_detection_returns_candidates_with_confidence_and_evidence():
 
     assert "recommended_rules" in c0 and isinstance(c0["recommended_rules"], list)
     # uniqueness + completeness
-    rule_types = {r.get("type") for r in c0["recommended_rules"]}
+    rule_types = {r.get("rule_type") for r in c0["recommended_rules"]}
     assert "uniqueness" in rule_types
     assert "completeness" in rule_types
 

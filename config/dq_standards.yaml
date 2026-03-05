@@ -32,3 +32,8 @@ suggestions:
         negative_name_hint: -0.2
       floors:
         min_confidence_to_return: 0.55
+
+ai_patcher:
+  enabled: true
+  max_rules_to_add: 15
+  min_confidence_to_accept: 0.6
