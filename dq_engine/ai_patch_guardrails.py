@@ -10,20 +10,14 @@ class PatchDecision:
     rejected: list[dict[str, Any]]
 
 
+# ---- helpers: make hashable ----
 def _freeze(v: Any) -> Any:
-    """
-    Make v hashable recursively.
-    - dict -> tuple of (key, frozen(value)) sorted by key
-    - list/tuple/set -> tuple of frozen items (sorted if all items comparable)
-    - primitives -> unchanged
-    """
     if isinstance(v, dict):
-        # Special handling: if key 'allowed_values' exists, order shouldn't matter
         items = []
         for k, vv in v.items():
             if k == "allowed_values" and isinstance(vv, (list, tuple, set)):
-                # sort allowed_values after freezing (best-effort)
                 frozen_vals = tuple(_freeze(x) for x in vv)
+                # order-insensitive for allowed_values
                 try:
                     frozen_vals = tuple(sorted(frozen_vals))
                 except Exception:
@@ -34,36 +28,78 @@ def _freeze(v: Any) -> Any:
         return tuple(sorted(items, key=lambda x: str(x[0])))
 
     if isinstance(v, (list, tuple, set)):
-        frozen_seq = tuple(_freeze(x) for x in v)
-        return frozen_seq
+        return tuple(_freeze(x) for x in v)
 
     return v
 
 
-def _signature(rule: dict[str, Any]) -> tuple:
+def _normalize_cols(rule_type: str | None, rule: dict[str, Any]) -> list[str]:
     """
-    Dedup signature: (type, columns, params/expectation)
-    Supports both patch-shape and canonical ruleset-shape.
+    Normalize where columns live:
+      - canonical patch: rule["column"] (str)
+      - legacy patch: rule["columns"] (list)
+      - canonical: rule["expectation"]["column"] (str)
+      - schema: expectation.required_columns (list)
+      - freshness: expectation.ts_column (str)
     """
-    rtype = rule.get("type") or rule.get("rule_type")
+    # canonical patch format
+    col = rule.get("column")
+    if isinstance(col, str) and col.strip():
+        return [col]
 
-    # columns may exist as list OR canonical expectation.column
+    # legacy patch format
     cols = rule.get("columns")
-    if cols is None:
-        exp = rule.get("expectation") or {}
-        col = exp.get("column")
-        cols = [col] if isinstance(col, str) else []
+    if isinstance(cols, list) and cols:
+        return [c for c in cols if isinstance(c, str)]
 
-    cols_t = _freeze(cols or [])
+    exp = rule.get("expectation") or {}
+    if not isinstance(exp, dict):
+        exp = {}
 
-    # params for patch-shape OR expectation for canonical shape
+    if rule_type == "schema":
+        rc = exp.get("required_columns")
+        if isinstance(rc, list):
+            return [c for c in rc if isinstance(c, str)]
+        return []
+
+    if rule_type == "freshness":
+        ts = exp.get("ts_column")
+        return [ts] if isinstance(ts, str) else []
+
+    # most column-based rules
+    col = exp.get("column")
+    return [col] if isinstance(col, str) else []
+
+
+def _normalize_payload(rule_type: str | None, rule: dict[str, Any]) -> dict[str, Any]:
+    """
+    Payload should NOT include column keys (we already normalize them separately).
+    Use:
+      - patch: params
+      - canonical: expectation (minus column-ish keys)
+    """
     payload = rule.get("params")
     if payload is None:
         payload = rule.get("expectation") or {}
+    if not isinstance(payload, dict):
+        return {}
 
-    payload_t = _freeze(payload or {})
+    # remove column-ish keys so patch/canonical dedup works
+    drop_keys = {"column", "columns", "required_columns", "ts_column"}
+    cleaned = {k: v for k, v in payload.items() if k not in drop_keys}
 
-    return (rtype, cols_t, payload_t)
+    # Optional: for schema, required_columns are handled via columns, so payload usually empty
+    return cleaned
+
+
+def _signature(rule: dict[str, Any]) -> tuple:
+    rule_type = rule.get("type") or rule.get("rule_type")
+    cols = _normalize_cols(rule_type, rule)
+    # Stable ordering
+    cols_t = tuple(sorted(cols))
+    payload = _normalize_payload(rule_type, rule)
+    payload_t = _freeze(payload)
+    return (rule_type, cols_t, payload_t)
 
 
 def _reject(rule: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -91,7 +127,7 @@ def validate_and_filter_ai_rules(
             rejected.append(_reject(r, "rule is not a dict"))
             continue
 
-        rtype = r.get("rule_type")
+        rtype = r.get("rule_type") or r.get("type")
         if rtype not in allowed_rule_types:
             rejected.append(_reject(r, f"type not allowed: {rtype}"))
             continue
@@ -110,16 +146,20 @@ def validate_and_filter_ai_rules(
         # Column checks for column-based rules
         col_rules = {"completeness", "uniqueness", "domain", "range", "date_not_in_future"}
         if rtype in col_rules:
-            cols = r.get("column").split(",")
-            if not isinstance(cols, list) or len(cols) == 0:
-                rejected.append(_reject(r, "missing/invalid columns"))
+            col = r.get("column")
+            if col is None and isinstance(r.get("columns"), list):
+                legacy_cols = [c for c in r.get("columns", []) if isinstance(c, str) and c.strip()]
+                if len(legacy_cols) == 1:
+                    col = legacy_cols[0]
+                    r["column"] = col
+                elif len(legacy_cols) > 1:
+                    rejected.append(_reject(r, "only single column supported in patch format"))
+                    continue
+            if not isinstance(col, str) or col.strip() == "":
+                rejected.append(_reject(r, "missing/invalid column"))
                 continue
-            if any((not isinstance(c, str) or c.strip() == "") for c in cols):
-                rejected.append(_reject(r, "columns must be non-empty strings"))
-                continue
-            if any(c not in dataset_columns for c in cols):
-                missing = [c for c in cols if c not in dataset_columns]
-                rejected.append(_reject(r, f"columns not in dataset: {missing}"))
+            if col not in dataset_columns:
+                rejected.append(_reject(r, f"column not in dataset: {col}"))
                 continue
 
         params = r.get("params") or {}

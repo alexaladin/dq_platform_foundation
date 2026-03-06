@@ -1,0 +1,70 @@
+dataset_id: materials_master
+ruleset_version: 1
+owner_team: SupplyChain
+data_owner: owner@example.com
+rules:
+- rule_id: U001
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: material_id
+  suggested_by: key_detection_engine
+- rule_id: C001
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: material_id
+  suggested_by: key_detection_engine
+- rule_id: U002
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: weight
+  suggested_by: key_detection_engine
+- rule_id: C002
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: weight
+  suggested_by: key_detection_engine
+- rule_id: U003
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: material_name
+  suggested_by: key_detection_engine
+- rule_id: C003
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: material_name
+  suggested_by: key_detection_engine
+- rule_id: U004
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: material_id
+  suggested_by: ai_patcher
+  ai_confidence: 0.7867986798679868
+  ai_rationale: material_id is near-unique with a distinct ratio of 0.99 and max duplicate
+    count of 2.
+  ai_evidence_used:
+    row_count: 202
+    non_null_count: 202
+    null_pct: 0.0
+    distinct_count: 200
+    distinct_ratio_non_null: 0.9900990099009901
+    duplicate_count: 2
+    max_dup_count: 2
+- rule_id: C004
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: material_id
+  suggested_by: ai_patcher
+  ai_confidence: 0.7867986798679868
+  ai_rationale: material_id has no null values, indicating high completeness.
+  ai_evidence_used:
+    row_count: 202
+    non_null_count: 202
+    null_pct: 0.0

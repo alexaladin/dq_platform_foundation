@@ -15,64 +15,101 @@ rules:
   expectation:
     column: movement_id
   suggested_by: key_detection_engine
-- rule_id: U002
-  rule_type: uniqueness
-  severity: high
-  expectation:
-    column: movement_id
-  suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: Each movement should have a unique identifier.
-  ai_evidence_used:
-    distinct_count: 500
-    duplicate_count: 0
 - rule_id: C002
+  rule_type: completeness
+  severity: medium
+  expectation:
+    column: material_id
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: material_id is almost complete; only 1 of 500 is null (null_pct =
+    0.002). Ensures reference integrity.
+  ai_evidence_used: 'Profiling: material_id null_pct = 0.002.'
+- rule_id: C003
   rule_type: completeness
   severity: high
   expectation:
-    column: movement_id
+    column: quantity
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: Movement ID is critical for identifying each record and should not
-    be null.
-  ai_evidence_used:
-    null_pct: 0.0
+  ai_rationale: No missing data in quantity column, ensuring transaction details are
+    always present.
+  ai_evidence_used: 'Profiling: null_pct = 0.0 for quantity.'
+- rule_id: C004
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_type
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: movement_type is fully populated, a crucial field for classifying
+    movement logic.
+  ai_evidence_used: Profiling null_pct = 0.0 for movement_type.
+- rule_id: C005
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: plant
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: plant is always populated and can be used for warehouse/site level
+    analytics.
+  ai_evidence_used: Profiling null_pct = 0.0 for plant.
+- rule_id: C006
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: movement_date is always filled, required for time-series analysis.
+  ai_evidence_used: Profiling null_pct = 0.0 for movement_date.
 - rule_id: D001
   rule_type: domain
-  severity: medium
+  severity: high
   expectation:
     column: movement_type
     allowed_values:
-    - type1
-    - type2
-    - type3
-    - type4
+    - '101'
+    - '102'
+    - '201'
+    - '999'
   suggested_by: ai_patcher
-  ai_confidence: 0.95
-  ai_rationale: Movement type should be one of the predefined categories.
-  ai_evidence_used:
-    distinct_count: 4
+  ai_confidence: 0.98
+  ai_rationale: movement_type has very low cardinality (4 distinct), and all valid
+    types are identified in profiling.
+  ai_evidence_used: 'Profiling: movement_type top_values keys are 101, 102, 201, 999;
+    4 unique codes only.'
 - rule_id: D002
   rule_type: domain
   severity: medium
   expectation:
     column: plant
     allowed_values:
-    - plant1
-    - plant2
-    - plant3
+    - PL01
+    - PL02
+    - PL03
   suggested_by: ai_patcher
-  ai_confidence: 0.95
-  ai_rationale: Plant should be one of the predefined locations.
-  ai_evidence_used:
-    distinct_count: 3
-- rule_id: T001
-  rule_type: date_not_in_future
+  ai_confidence: 0.98
+  ai_rationale: plant column is categorical with 3 identified valid values.
+  ai_evidence_used: 'Profiling: plant top_values keys are PL01, PL02, PL03.'
+- rule_id: C007
+  rule_type: completeness
   severity: medium
   expectation:
-    column: movement_date
+    column: ts_load
   suggested_by: ai_patcher
-  ai_confidence: 0.9
-  ai_rationale: Movement date should not be in the future.
-  ai_evidence_used:
-    distinct_count: 57
+  ai_confidence: 1.0
+  ai_rationale: ts_load is always populated (null_pct = 0.0), needed for loading timestamp
+    reference.
+  ai_evidence_used: 'Profiling: ts_load null_pct = 0.0.'
+- rule_id: C008
+  rule_type: completeness
+  severity: medium
+  expectation:
+    column: forecast_date
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: forecast_date is non-null in all records, ensuring reliable downstream
+    calculations.
+  ai_evidence_used: 'Profiling: forecast_date null_pct = 0.0.'
