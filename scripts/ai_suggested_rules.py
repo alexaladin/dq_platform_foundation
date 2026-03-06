@@ -10,6 +10,7 @@ import pandas as pd
 import yaml
 
 from dq_ai.provider_azure_openai import AzureOpenAIProvider
+from dq_ai.provider_codemie_assistant import CodeMieAssistantProvider
 from dq_ai.provider_mock import MockAIProvider
 from dq_engine.ai_patch_guardrails import validate_and_filter_ai_rules
 from dq_engine.profiling import profile_df
@@ -74,7 +75,7 @@ def _ensure_schema_ts_load(suggested_doc: dict, standards: dict) -> None:
         {
             "rule_id": "schema_0001",  # will be unique for new rulesets; if existing ruleset, schema exists already
             "rule_type": "schema",
-            "required_columns": [ts_col],
+            "expectation": {"required_columns": [ts_col]},
             "severity": "high",
             "description": f"Platform baseline: require {ts_col}",
             "suggested_by": "platform_baseline",
@@ -107,7 +108,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--project_root", default=".")
     ap.add_argument("--dataset", required=True)
-    ap.add_argument("--ai", choices=["off", "mock", "azure"], default="off")
+    ap.add_argument("--ai", choices=["off", "mock", "azure", "codemie"], default="off")
     ap.add_argument("--max_ai_rules", type=int, default=15)
     ap.add_argument("--min_ai_confidence", type=float, default=None)
     args = ap.parse_args()
@@ -156,8 +157,10 @@ def main():
     if args.ai != "off":
         if args.ai == "mock":
             provider = MockAIProvider()
-        else:
+        elif args.ai == "azure":
             provider = AzureOpenAIProvider()
+        elif args.ai == "codemie":
+            provider = CodeMieAssistantProvider()
 
         deterministic_context = {
             "key_candidates": key_artifacts.get("key_candidates", []),
@@ -175,6 +178,7 @@ def main():
         }
 
         # Save prompt input (audit)
+        print(profiling)
         prompt_input = {
             "dataset_id": dataset_id,
             "allowed_rule_types": ALLOWED_RULE_TYPES,
@@ -185,6 +189,7 @@ def main():
             "existing_ruleset_yaml": existing_yaml,
             "deterministic_context": deterministic_context,
         }
+
         (out_ai / f"{ts}__{dataset_id}__ai_prompt_input.json").write_text(
             json.dumps(prompt_input, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -199,6 +204,7 @@ def main():
             deterministic_context=deterministic_context,
             max_rules_to_add=args.max_ai_rules,
         )
+        print(ai_resp)
 
         # Save raw model output
         (out_ai / f"{ts}__{dataset_id}__ai_patch_raw.json").write_text(

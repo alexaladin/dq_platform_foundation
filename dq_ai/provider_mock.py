@@ -36,8 +36,8 @@ class MockAIProvider(AIProviderBase):
                     # We don't have actual values list in profiling, so keep params empty for mock.
                     rules.append(
                         {
-                            "type": "domain",
-                            "columns": [c],
+                            "rule_type": "domain",
+                            "column": c,
                             "severity": "medium",
                             "params": {"max_distinct": distinct},
                             "confidence": 0.65,
@@ -54,8 +54,8 @@ class MockAIProvider(AIProviderBase):
                 if any(k in name for k in ("date", "dt", "ts")) or "datetime" in dtype:
                     rules.append(
                         {
-                            "type": "date_not_in_future",
-                            "columns": [c],
+                            "rule_type": "date_not_in_future",
+                            "column": c,
                             "severity": "medium",
                             "params": {},
                             "confidence": 0.6,
@@ -76,8 +76,8 @@ class MockAIProvider(AIProviderBase):
                     if mn < 0:
                         rules.append(
                             {
-                                "type": "range",
-                                "columns": [c],
+                                "rule_type": "range",
+                                "column": c,
                                 "severity": "low",
                                 "params": {"min": 0},
                                 "confidence": 0.55,

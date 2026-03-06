@@ -14,42 +14,54 @@ ALLOWED_TYPES = {
 
 def validate_rule(rule: dict) -> None:
     assert isinstance(rule, dict)
-    assert "type" in rule, "rule.type is required"
-    assert rule["type"] in ALLOWED_TYPES, f"unknown rule type: {rule['type']}"
+    assert "rule_type" in rule, "rule.rule_type is required"
+    assert rule["rule_type"] in ALLOWED_TYPES, f"unknown rule type: {rule['rule_type']}"
 
-    # columns expected for most rules
-    if rule["type"] in {"completeness", "uniqueness", "domain", "range", "date_not_in_future"}:
-        assert "columns" in rule
-        assert isinstance(rule["columns"], list)
-        assert len(rule["columns"]) >= 1
-        assert all(isinstance(c, str) and c for c in rule["columns"])
+    assert "expectation" in rule and isinstance(rule["expectation"], dict)
+    exp = rule["expectation"]
+
+    # column expected for most rules
+    if rule["rule_type"] in {"completeness", "uniqueness", "domain", "range", "date_not_in_future"}:
+        assert "column" in exp
+        assert isinstance(exp["column"], str)
+        assert exp["column"].strip()
 
     # domain specifics
-    if rule["type"] == "domain":
-        assert "allowed_values" in rule
-        assert isinstance(rule["allowed_values"], list)
-        assert len(rule["allowed_values"]) >= 1
+    if rule["rule_type"] == "domain":
+        assert "allowed_values" in exp
+        assert isinstance(exp["allowed_values"], list)
+        assert len(exp["allowed_values"]) >= 1
 
     # range specifics
-    if rule["type"] == "range":
-        assert "min" in rule or "max" in rule, "range must have min and/or max"
+    if rule["rule_type"] == "range":
+        assert "min" in exp or "max" in exp, "range must have min and/or max"
+
+    # schema specifics
+    if rule["rule_type"] == "schema":
+        assert "required_columns" in exp
+        assert isinstance(exp["required_columns"], list)
+        assert len(exp["required_columns"]) >= 1
 
 
 def test_validate_good_uniqueness_rule():
-    rule = {"type": "uniqueness", "columns": ["customer_id"], "severity": "high"}
+    rule = {
+        "rule_type": "uniqueness",
+        "severity": "high",
+        "expectation": {"column": "customer_id", "max_duplicates_allowed": 0},
+    }
     validate_rule(rule)
 
 
 def test_validate_missing_type_raises():
     with pytest.raises(AssertionError):
-        validate_rule({"columns": ["x"]})
+        validate_rule({"expectation": {"column": "x"}})
 
 
 def test_validate_unknown_type_raises():
     with pytest.raises(AssertionError):
-        validate_rule({"type": "unknown", "columns": ["x"]})
+        validate_rule({"rule_type": "unknown", "expectation": {"column": "x"}})
 
 
 def test_validate_domain_requires_allowed_values():
     with pytest.raises(AssertionError):
-        validate_rule({"type": "domain", "columns": ["status"]})
+        validate_rule({"rule_type": "domain", "expectation": {"column": "status"}})
