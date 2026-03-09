@@ -3,6 +3,29 @@ ruleset_version: 1
 owner_team: SupplyChain
 data_owner: owner@example.com
 rules:
+- rule_id: schema_0001
+  rule_type: schema
+  expectation:
+    required_columns:
+    - movement_id
+    - material_id
+    - quantity
+    - movement_type
+    - plant
+    - movement_date
+    - ts_load
+    - forecast_date
+  severity: high
+  description: 'Deterministic schema: required columns from dataset config'
+  suggested_by: dataset_config
+- rule_id: freshness_0001
+  rule_type: freshness
+  expectation:
+    ts_column: ts_load
+    max_age_days: 10
+  severity: medium
+  description: 'Deterministic freshness: 10 days max age'
+  suggested_by: dataset_config
 - rule_id: U001
   rule_type: uniqueness
   severity: high
@@ -17,14 +40,14 @@ rules:
   suggested_by: key_detection_engine
 - rule_id: C002
   rule_type: completeness
-  severity: medium
+  severity: high
   expectation:
     column: material_id
   suggested_by: ai_patcher
-  ai_confidence: 0.99
-  ai_rationale: material_id is almost complete; only 1 of 500 is null (null_pct =
-    0.002). Ensures reference integrity.
-  ai_evidence_used: 'Profiling: material_id null_pct = 0.002.'
+  ai_confidence: 0.98
+  ai_rationale: material_id is nearly complete (0.2% nulls), and its completeness
+    is crucial for material tracking.
+  ai_evidence_used: Only 1/500 records have a null value; strong non-null presence.
 - rule_id: C003
   rule_type: completeness
   severity: high
@@ -32,9 +55,8 @@ rules:
     column: quantity
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: No missing data in quantity column, ensuring transaction details are
-    always present.
-  ai_evidence_used: 'Profiling: null_pct = 0.0 for quantity.'
+  ai_rationale: A valid quantity is essential for all goods movement records.
+  ai_evidence_used: 0% nulls; 500/500 non-null records.
 - rule_id: C004
   rule_type: completeness
   severity: high
@@ -42,9 +64,9 @@ rules:
     column: movement_type
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: movement_type is fully populated, a crucial field for classifying
-    movement logic.
-  ai_evidence_used: Profiling null_pct = 0.0 for movement_type.
+  ai_rationale: movement_type is always present and is critical for categorizing goods
+    movements.
+  ai_evidence_used: movement_type shows 0% nulls and is present in all records.
 - rule_id: C005
   rule_type: completeness
   severity: high
@@ -52,9 +74,9 @@ rules:
     column: plant
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: plant is always populated and can be used for warehouse/site level
+  ai_rationale: Plant assignment is complete for all records and mandatory for logistics
     analytics.
-  ai_evidence_used: Profiling null_pct = 0.0 for plant.
+  ai_evidence_used: plant contains 0% nulls (500/500 non-null).
 - rule_id: C006
   rule_type: completeness
   severity: high
@@ -62,37 +84,8 @@ rules:
     column: movement_date
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: movement_date is always filled, required for time-series analysis.
-  ai_evidence_used: Profiling null_pct = 0.0 for movement_date.
-- rule_id: D001
-  rule_type: domain
-  severity: high
-  expectation:
-    column: movement_type
-    allowed_values:
-    - '101'
-    - '102'
-    - '201'
-    - '999'
-  suggested_by: ai_patcher
-  ai_confidence: 0.98
-  ai_rationale: movement_type has very low cardinality (4 distinct), and all valid
-    types are identified in profiling.
-  ai_evidence_used: 'Profiling: movement_type top_values keys are 101, 102, 201, 999;
-    4 unique codes only.'
-- rule_id: D002
-  rule_type: domain
-  severity: medium
-  expectation:
-    column: plant
-    allowed_values:
-    - PL01
-    - PL02
-    - PL03
-  suggested_by: ai_patcher
-  ai_confidence: 0.98
-  ai_rationale: plant column is categorical with 3 identified valid values.
-  ai_evidence_used: 'Profiling: plant top_values keys are PL01, PL02, PL03.'
+  ai_rationale: Each goods movement must have a corresponding date.
+  ai_evidence_used: 'Profiling: 0% nulls in movement_date.'
 - rule_id: C007
   rule_type: completeness
   severity: medium
@@ -100,9 +93,8 @@ rules:
     column: ts_load
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: ts_load is always populated (null_pct = 0.0), needed for loading timestamp
-    reference.
-  ai_evidence_used: 'Profiling: ts_load null_pct = 0.0.'
+  ai_rationale: Load timestamp always exists, enhancing traceability of ingested records.
+  ai_evidence_used: ts_load is present (0% nulls) in the profiling.
 - rule_id: C008
   rule_type: completeness
   severity: medium
@@ -110,6 +102,82 @@ rules:
     column: forecast_date
   suggested_by: ai_patcher
   ai_confidence: 1.0
-  ai_rationale: forecast_date is non-null in all records, ensuring reliable downstream
-    calculations.
-  ai_evidence_used: 'Profiling: forecast_date null_pct = 0.0.'
+  ai_rationale: forecast_date is provided in every row, relevant for forecasting/analysis.
+  ai_evidence_used: 'profiling: 0% nulls for forecast_date.'
+- rule_id: D001
+  rule_type: domain
+  severity: high
+  expectation:
+    column: plant
+    allowed_values:
+    - PL02
+    - PL01
+    - PL03
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: Plant field should only have the observed top values, ensuring valid
+    plant codes in dataset.
+  ai_evidence_used: All plant values found in the profiling are PL02, PL01, or PL03.
+- rule_id: D002
+  rule_type: domain
+  severity: high
+  expectation:
+    column: movement_type
+    allowed_values:
+    - RECEIPT
+    - ISSUE
+    - TRANSFER
+    - MOVE
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: Only four movement types are present in the dataset; ensuring no unexpected
+    categories.
+  ai_evidence_used: Profiling lists only RECEIPT, ISSUE, TRANSFER, MOVE as top values
+    for movement_type.
+- rule_id: D003
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: ts_load
+    allowed_values:
+    - 2/26/2026
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: ts_load value is constant (single value) in the dataset; restricts
+    to prevent anomalies.
+  ai_evidence_used: All 500 records share ts_load = '2/26/2026'.
+- rule_id: D004
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: forecast_date
+    allowed_values:
+    - 2/26/2026
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: forecast_date is constant ('2/26/2026'); enforcing prevents future
+    mismatch.
+  ai_evidence_used: All records show forecast_date = '2/26/2026' in profile.
+- rule_id: R001
+  rule_type: range
+  severity: high
+  expectation:
+    column: quantity
+    min: -5.0
+    max: 24.31
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: All observed quantity values lie between -5.0 and 24.31, indicating
+    natural numeric range limits in context.
+  ai_evidence_used: Profiling shows quantity min = -5.0 and max = 24.31, with no nulls.
+- rule_id: T001
+  rule_type: date_not_in_future
+  severity: high
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: movement_date should not be in the future to ensure records reflect
+    actual or historical events.
+  ai_evidence_used: movement_date eligible for future-dating constraint as per candidate
+    list.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from dq_ai.payload_builder import build_column_candidates
 from dq_ai.provider_base import AIProviderBase
 from dq_ai.types import AISuggestPatchResponse
 
@@ -9,7 +10,7 @@ from dq_ai.types import AISuggestPatchResponse
 class MockAIProvider(AIProviderBase):
     """
     Mock provider for patch-mode.
-    Uses simple heuristics on profiling to return rules_to_add.
+    Uses simple heuristics on column_candidates to return rules_to_add.
     """
 
     def suggest_rules_patch(
@@ -23,74 +24,73 @@ class MockAIProvider(AIProviderBase):
         deterministic_context: dict[str, Any],
         max_rules_to_add: int = 15,
     ) -> AISuggestPatchResponse:
-        cols = profiling.get("columns") or {}
+        column_candidates = build_column_candidates(
+            profiling=profiling,
+            allowed_rule_types=allowed_rule_types,
+            standards=standards,
+        )
 
         rules: list[dict[str, Any]] = []
 
-        # Domain suggestion: low distinct_count columns with low null_pct
+        # Domain suggestions: use candidates with top_values
         if "domain" in allowed_rule_types:
-            for c, p in cols.items():
-                distinct = int(p.get("distinct_count", p.get("distinct", 0)) or 0)
-                null_pct = float(p.get("null_pct", 1.0) or 1.0)
-                if distinct > 0 and distinct <= 20 and null_pct <= 0.05:
-                    # We don't have actual values list in profiling, so keep params empty for mock.
+            for col, prof in column_candidates.get("domain", {}).items():
+                top_vals = prof.get("top_values", [])
+                if top_vals and len(top_vals) <= 20:
+                    allowed = [
+                        str(v[0]) for v in top_vals
+                    ]  # extract values from [val, count] pairs
                     rules.append(
                         {
                             "rule_type": "domain",
-                            "column": c,
+                            "column": col,
                             "severity": "medium",
-                            "params": {"max_distinct": distinct},
-                            "confidence": 0.65,
-                            "rationale": f"Column looks enum-like (distinct_count={distinct}, null_pct={null_pct}).",
-                            "evidence_used": [f"distinct_count={distinct}", f"null_pct={null_pct}"],
+                            "params": {"allowed_values": allowed},
+                            "confidence": 0.7,
+                            "rationale": f"Low cardinality column with {len(allowed)} distinct values.",
+                            "evidence_used": [f"top_values={top_vals[:5]}"],
                         }
                     )
 
-        # Date-not-in-future: name-based
+        # Date-not-in-future: use date candidates
         if "date_not_in_future" in allowed_rule_types:
-            for c, p in cols.items():
-                name = c.lower()
-                dtype = str(p.get("dtype", "")).lower()
-                if any(k in name for k in ("date", "dt", "ts")) or "datetime" in dtype:
+            for col, prof in column_candidates.get("date_not_in_future", {}).items():
+                dtype = str(prof.get("dtype", "")).lower()
+                rules.append(
+                    {
+                        "rule_type": "date_not_in_future",
+                        "column": col,
+                        "severity": "medium",
+                        "params": {},
+                        "confidence": 0.6,
+                        "rationale": "Column name/dtype suggests datetime; prevent future dates.",
+                        "evidence_used": [f"dtype={dtype}"],
+                    }
+                )
+
+        # Range: suggest non-negative if min < 0
+        if "range" in allowed_rule_types:
+            for col, prof in column_candidates.get("range", {}).items():
+                mn = prof.get("min")
+                mx = prof.get("max")
+                if mn is not None and mn < 0:
                     rules.append(
                         {
-                            "rule_type": "date_not_in_future",
-                            "column": c,
-                            "severity": "medium",
-                            "params": {},
+                            "rule_type": "range",
+                            "column": col,
+                            "severity": "low",
+                            "params": {"min": 0},
                             "confidence": 0.6,
-                            "rationale": "Column name/dtype suggests datetime; prevent future dates.",
-                            "evidence_used": [f"dtype={dtype}"],
+                            "rationale": f"Observed min={mn}; suggest non-negative constraint.",
+                            "evidence_used": [f"min={mn}", f"max={mx}"],
                         }
                     )
-
-        # Range: suggest non-negative if min_value < 0 (if present)
-        if "range" in allowed_rule_types:
-            for c, p in cols.items():
-                if "min_value" in p and "max_value" in p:
-                    try:
-                        mn = float(p["min_value"])
-                        mx = float(p["max_value"])
-                    except Exception:
-                        continue
-                    if mn < 0:
-                        rules.append(
-                            {
-                                "rule_type": "range",
-                                "column": c,
-                                "severity": "low",
-                                "params": {"min": 0},
-                                "confidence": 0.55,
-                                "rationale": f"Observed min_value={mn} suggests potential negatives; propose non-negative check.",
-                                "evidence_used": [f"min_value={mn}", f"max_value={mx}"],
-                            }
-                        )
 
         # Cap
         rules = rules[:max_rules_to_add]
 
         rationale = (
-            "Mock AI patch generated from profiling heuristics; "
+            "Mock AI patch generated from column_candidates heuristics; "
             "intended for pipeline testing and demos."
         )
         return AISuggestPatchResponse(

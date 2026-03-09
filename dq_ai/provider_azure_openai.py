@@ -8,33 +8,11 @@ from typing import Any
 import httpx
 from dotenv import load_dotenv
 
+from dq_ai.payload_builder import build_column_candidates
 from dq_ai.provider_base import AIProviderBase
 from dq_ai.types import AISuggestPatchResponse
 
 load_dotenv()
-
-
-def _compact_profiling(profiling: dict[str, Any], max_cols: int = 50) -> dict[str, Any]:
-    """
-    Reduce payload size: keep only essential metrics for AI.
-    """
-    cols = profiling.get("columns") or {}
-    compact_cols = {}
-    for i, (c, p) in enumerate(cols.items()):
-        if i >= max_cols:
-            break
-        compact_cols[c] = {
-            "dtype": p.get("dtype"),
-            "null_pct": p.get("null_pct"),
-            "non_null_count": p.get("non_null_count"),
-            "distinct_count": p.get("distinct_count", p.get("distinct")),
-            "distinct_ratio_non_null": p.get("distinct_ratio_non_null"),
-            "duplicate_count": p.get("duplicate_count"),
-            "max_dup_count": p.get("max_dup_count"),
-            "min_value": p.get("min_value"),
-            "max_value": p.get("max_value"),
-        }
-    return {"row_count": profiling.get("row_count"), "columns": compact_cols}
 
 
 class AzureOpenAIProvider(AIProviderBase):
@@ -90,26 +68,35 @@ class AzureOpenAIProvider(AIProviderBase):
             "Return ONLY valid JSON. Do NOT include markdown. "
             "You must propose ONLY additions (patch-mode). "
             "Never modify or delete existing rules. "
-            "All rule.type must be in allowed_rule_types. "
-            "Rules must reference only columns that exist in profiling.columns. "
+            "All rule_type must be in allowed_rule_types. "
+            "Rules must reference only columns in column_candidates for the respective rule type. "
+            "For range rules: use min/max from column_candidates.range. "
+            "For domain rules: infer allowed_values from top_values in column_candidates.domain. "
+            "For date_not_in_future rules: only use column_candidates.date_not_in_future. "
             "Output schema: {rules_to_add: [rule], rationale: string}. "
             "Each rule: {rule_type, column, severity, params, confidence, rationale, evidence_used}."
+        )
+
+        column_candidates = build_column_candidates(
+            profiling=profiling,
+            allowed_rule_types=allowed_rule_types,
+            standards=standards,
         )
 
         user_payload = {
             "dataset_id": dataset_id,
             "allowed_rule_types": allowed_rule_types,
             "max_rules_to_add": max_rules_to_add,
-            "standards": standards.get(
-                "ai_patcher", standards
-            ),  # safe; you may pass full standards too
-            "profiling": _compact_profiling(profiling),
+            "standards": standards.get("ai_patcher", standards),
+            "column_candidates": column_candidates,
             "existing_ruleset_yaml": existing_ruleset_yaml,
             "deterministic_context": deterministic_context,
             "notes": [
                 "AI is advisory only. Prefer conservative suggestions.",
+                "For range rules: only suggest for columns in column_candidates.range.",
+                "For domain rules: only suggest for columns in column_candidates.domain, using provided top_values as evidence.",
+                "For date_not_in_future rules: only suggest for columns in column_candidates.date_not_in_future.",
                 "Do not invent business-specific rules.",
-                "If unsure, do not suggest.",
             ],
         }
 

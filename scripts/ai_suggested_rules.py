@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from dq_ai.payload_builder import build_column_candidates
 from dq_ai.provider_azure_openai import AzureOpenAIProvider
 from dq_ai.provider_codemie_assistant import CodeMieAssistantProvider
 from dq_ai.provider_mock import MockAIProvider
@@ -50,35 +51,65 @@ def _load_standards(root: Path) -> dict:
     return _load_yaml(root / "config" / "dq_standards.yaml")
 
 
-def _ensure_schema_ts_load(suggested_doc: dict, standards: dict) -> None:
+def _ensure_schema_required_columns(suggested_doc: dict, ds_cfg: dict, standards: dict) -> None:
     """
-    Optional platform baseline schema rule. Keep simple:
-    - If standards says enforce_ts_load_in_schema: add schema rule requiring ts_load
-    - If schema rule already exists: do nothing
+    Deterministic schema rule based on dataset config.
+    - If required_columns is provided, enforce them.
+    - Else if ts_load_column is provided, enforce it.
+    - If schema rule already exists: do nothing.
     """
-    enforce = bool(
-        (standards.get("enforce_ts_load_in_schema") is True)
-        or ((standards.get("platform_baseline") or {}).get("enforce_ts_load_in_schema") is True)
-        or ((standards.get("schema") or {}).get("enforce_ts_load_in_schema") is True)
-    )
-    if not enforce:
-        return
+    required_columns = ds_cfg.get("required_columns")
+    if not required_columns:
+        ts_col = (ds_cfg.get("ts_load_column") or standards.get("ts_load_column") or "").strip()
+        if ts_col:
+            required_columns = [ts_col]
 
-    ts_col = (standards.get("ts_load_column") or "ts_load").strip()
+    if not required_columns:
+        return
 
     rules = suggested_doc.setdefault("rules", [])
     if any(isinstance(r, dict) and r.get("rule_type") == "schema" for r in rules):
         return
 
-    # Minimal schema rule contract
     rules.append(
         {
-            "rule_id": "schema_0001",  # will be unique for new rulesets; if existing ruleset, schema exists already
+            "rule_id": "schema_0001",
             "rule_type": "schema",
-            "expectation": {"required_columns": [ts_col]},
+            "expectation": {"required_columns": required_columns},
             "severity": "high",
-            "description": f"Platform baseline: require {ts_col}",
-            "suggested_by": "platform_baseline",
+            "description": "Deterministic schema: required columns from dataset config",
+            "suggested_by": "dataset_config",
+        }
+    )
+
+
+def _ensure_freshness_rule(suggested_doc: dict, ds_cfg: dict) -> None:
+    """
+    Deterministic freshness rule based on dataset config.
+    Requires ts_load_column and freshness_max_age_days.
+    """
+    ts_col = (ds_cfg.get("ts_load_column") or "").strip()
+    max_age = ds_cfg.get("freshness_max_age_days")
+    if not ts_col or max_age is None:
+        return
+
+    try:
+        max_age_days = int(max_age)
+    except (TypeError, ValueError):
+        return
+
+    rules = suggested_doc.setdefault("rules", [])
+    if any(isinstance(r, dict) and r.get("rule_type") == "freshness" for r in rules):
+        return
+
+    rules.append(
+        {
+            "rule_id": "freshness_0001",
+            "rule_type": "freshness",
+            "expectation": {"ts_column": ts_col, "max_age_days": max_age_days},
+            "severity": ds_cfg.get("freshness_severity", "medium"),
+            "description": f"Deterministic freshness: {max_age_days} days max age",
+            "suggested_by": "dataset_config",
         }
     )
 
@@ -144,7 +175,8 @@ def main():
 
     # --- Deterministic additions ---
     standards = _load_standards(root)
-    _ensure_schema_ts_load(suggested_doc, standards)
+    _ensure_schema_required_columns(suggested_doc, ds_cfg, standards)
+    _ensure_freshness_rule(suggested_doc, ds_cfg)
     key_artifacts = _add_key_validation_suggestions(suggested_doc, standards, profiling)
 
     # --- AI patch-mode ---
@@ -178,14 +210,19 @@ def main():
         }
 
         # Save prompt input (audit)
-        print(profiling)
+        column_candidates = build_column_candidates(
+            profiling=profiling,
+            allowed_rule_types=ALLOWED_RULE_TYPES,
+            standards=standards,
+        )
+
         prompt_input = {
             "dataset_id": dataset_id,
             "allowed_rule_types": ALLOWED_RULE_TYPES,
             "max_rules_to_add": args.max_ai_rules,
             "min_ai_confidence": args.min_ai_confidence,
             "standards": standards.get("ai_patcher", standards),
-            "profiling": profiling,
+            "column_candidates": column_candidates,
             "existing_ruleset_yaml": existing_yaml,
             "deterministic_context": deterministic_context,
         }

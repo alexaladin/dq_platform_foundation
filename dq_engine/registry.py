@@ -14,6 +14,7 @@ class Rule:
     severity: str
     expectation: dict[str, Any]
     suggested_by: str
+    description: str | None = None
     ai_confidence: float | None = None
     ai_rationale: str | None = None
     ai_evidence_used: dict[str, Any] | None = None
@@ -30,7 +31,8 @@ class RuleSet:
 
 def load_ruleset(path: Path) -> RuleSet:
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-    rules = [Rule(**r) for r in doc["rules"]]
+    rule_fields = set(Rule.__annotations__.keys())
+    rules = [Rule(**{k: v for k, v in r.items() if k in rule_fields}) for r in doc["rules"]]
     return RuleSet(
         dataset_id=doc["dataset_id"],
         ruleset_version=int(doc["ruleset_version"]),
