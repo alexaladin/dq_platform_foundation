@@ -1,11 +1,14 @@
 from __future__ import annotations
-from typing import Dict
+
 import pandas as pd
 
-def summarize_run(run_id: str, all_results: pd.DataFrame) -> Dict[str, object]:
+
+def summarize_run(run_id: str, all_results: pd.DataFrame) -> dict[str, object]:
     total = len(all_results)
     failed = int((all_results["status"] == "fail").sum())
-    failed_critical = int(((all_results["status"] == "fail") & (all_results["severity"] == "critical")).sum())
+    failed_critical = int(
+        ((all_results["status"] == "fail") & (all_results["severity"] == "critical")).sum()
+    )
     score = 100.0 if total == 0 else max(0.0, 100.0 - 100.0 * (failed / total))
     status = "pass"
     if failed_critical > 0:

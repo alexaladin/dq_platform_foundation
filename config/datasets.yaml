@@ -5,6 +5,9 @@ datasets:
     owner_team: SupplyChain
     data_owner: owner@example.com
     sla_tier: gold
+    required_columns: [ts_load]
+    ts_load_column: ts_load
+    freshness_max_age_days: 2
 
   - dataset_id: goods_movements
     source_type: csv
@@ -12,6 +15,10 @@ datasets:
     owner_team: SupplyChain
     data_owner: owner@example.com
     sla_tier: gold
+    required_columns: [movement_id,material_id,quantity,movement_type,plant,movement_date,ts_load,forecast_date]
+    ts_load_column: ts_load
+    freshness_max_age_days: 10
+
 
   - dataset_id: invent_location
     source_type: csv
@@ -19,5 +26,6 @@ datasets:
     owner_team: SupplyChain
     data_owner: owner@example.com
     sla_tier: gold
-
-
+    required_columns: [ts_load]
+    ts_load_column: ts_load
+    freshness_max_age_days: 2
