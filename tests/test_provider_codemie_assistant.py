@@ -29,6 +29,9 @@ def test_suggest_rules_patch_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
         "date_not_in_future": {
             "created_at": {"dtype": "str", "null_pct": 0.0, "non_null_count": 15}
         },
+        "anomaly_detection": {
+            "qty": {"min": -5, "max": 100, "mean": 22.0, "std": 10.0, "q1": 10.0, "q3": 30.0}
+        },
     }
     monkeypatch.setattr(mod, "build_column_candidates", lambda **kwargs: fake_candidates)
 
@@ -65,9 +68,9 @@ def test_suggest_rules_patch_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
             generated = {
                 "rules_to_add": [
                     {
-                        "rule_type": "domain",
-                        "column": "status",
-                        "params": {"allowed_values": ["A", "B"]},
+                        "rule_type": "anomaly_detection",
+                        "column": "qty",
+                        "params": {"method": "non_negative"},
                     }
                 ],
                 "rationale": "ok",
@@ -84,13 +87,14 @@ def test_suggest_rules_patch_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
         profiling={"columns": {}},
         standards={"ai_patcher": {"enabled": True}},
         existing_ruleset_yaml=None,
-        allowed_rule_types=["domain", "range", "date_not_in_future"],
+        allowed_rule_types=["domain", "range", "date_not_in_future", "anomaly_detection"],
         deterministic_context={"k": "v"},
         max_rules_to_add=5,
     )
 
     assert result.rationale == "ok"
     assert len(result.rules_to_add) == 1
+    assert result.rules_to_add[0]["rule_type"] == "anomaly_detection"
     assert result.tokens_used == 321
     assert isinstance(result.latency_ms, int)
 
@@ -110,6 +114,7 @@ def test_suggest_rules_patch_happy_path(monkeypatch: pytest.MonkeyPatch) -> None
     assert payload["column_candidates"] == fake_candidates
     assert payload["deterministic_context"] == {"k": "v"}
     assert payload["max_rules_to_add"] == 5
+    assert "anomaly_detection" in payload["allowed_rule_types"]
 
 
 def test_suggest_rules_patch_invalid_generated_json_raises(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -183,3 +183,161 @@ def check_freshness(df: pd.DataFrame, ts_column: str, max_age_days: int) -> Chec
     threshold = {"max_age_days": max_age_days, "ts_column": ts_column}
 
     return CheckResult(status, observed, threshold, None)
+
+
+def check_anomaly_detection(
+    df: pd.DataFrame,
+    column: str,
+    method: str,
+    direction: str = "both",
+    threshold: float | None = None,
+    min_hard: float | None = None,
+    max_hard: float | None = None,
+) -> CheckResult:
+    """
+    Execute anomaly detection for a numeric column.
+
+    Supported methods:
+    - non_negative: flags values < 0
+    - hard_bounds: flags values outside [min_hard, max_hard]
+    - iqr: flags values outside [Q1 - threshold*IQR, Q3 + threshold*IQR]
+    - zscore: flags values with |z| > threshold (or one-sided by direction)
+    """
+    if column not in df.columns:
+        return CheckResult(
+            "fail",
+            {"error": "missing_column", "column": column},
+            {
+                "method": method,
+                "direction": direction,
+                "threshold": threshold,
+                "min_hard": min_hard,
+                "max_hard": max_hard,
+            },
+            None,
+        )
+
+    if direction not in {"both", "high", "low"}:
+        return CheckResult(
+            "fail",
+            {"error": "invalid_direction", "direction": direction},
+            {
+                "method": method,
+                "direction": direction,
+                "threshold": threshold,
+                "min_hard": min_hard,
+                "max_hard": max_hard,
+            },
+            None,
+        )
+
+    s = pd.to_numeric(df[column], errors="coerce")
+    bad = s.isna()
+    valid = s.notna()
+
+    if valid.sum() == 0:
+        return CheckResult(
+            "fail",
+            {"error": "column_not_numeric_or_all_null", "column": column},
+            {
+                "method": method,
+                "direction": direction,
+                "threshold": threshold,
+                "min_hard": min_hard,
+                "max_hard": max_hard,
+            },
+            df.index[bad],
+        )
+
+    m = str(method).lower()
+    observed: dict[str, Any] = {
+        "method": m,
+        "direction": direction,
+        "total": int(len(df)),
+        "numeric_non_null": int(valid.sum()),
+        "invalid_numeric_count": int(bad.sum()),
+    }
+    threshold_out: dict[str, Any] = {
+        "method": m,
+        "direction": direction,
+        "threshold": threshold,
+        "min_hard": min_hard,
+        "max_hard": max_hard,
+    }
+
+    if m == "non_negative":
+        bad |= s < 0
+
+    elif m == "hard_bounds":
+        if min_hard is None and max_hard is None:
+            return CheckResult(
+                "fail",
+                {"error": "hard_bounds_requires_min_or_max", **observed},
+                threshold_out,
+                None,
+            )
+        if min_hard is not None:
+            bad |= s < float(min_hard)
+        if max_hard is not None:
+            bad |= s > float(max_hard)
+
+    elif m == "iqr":
+        thr = float(threshold) if threshold is not None else 1.5
+        if thr <= 0:
+            return CheckResult(
+                "fail",
+                {"error": "invalid_iqr_threshold", "threshold": threshold, **observed},
+                threshold_out,
+                None,
+            )
+        q1 = float(s[valid].quantile(0.25))
+        q3 = float(s[valid].quantile(0.75))
+        iqr = q3 - q1
+        observed.update({"q1": q1, "q3": q3, "iqr": iqr})
+        threshold_out["threshold"] = thr
+
+        if iqr > 0:
+            low = q1 - thr * iqr
+            high = q3 + thr * iqr
+            if direction == "high":
+                bad |= s > high
+            elif direction == "low":
+                bad |= s < low
+            else:
+                bad |= (s < low) | (s > high)
+
+    elif m == "zscore":
+        thr = float(threshold) if threshold is not None else 3.0
+        if thr <= 0:
+            return CheckResult(
+                "fail",
+                {"error": "invalid_zscore_threshold", "threshold": threshold, **observed},
+                threshold_out,
+                None,
+            )
+        mean = float(s[valid].mean())
+        std = float(s[valid].std(ddof=0))
+        observed.update({"mean": mean, "std": std})
+        threshold_out["threshold"] = thr
+
+        if std != 0:
+            z = (s - mean) / std
+            if direction == "high":
+                bad |= z > thr
+            elif direction == "low":
+                bad |= z < -thr
+            else:
+                bad |= z.abs() > thr
+
+    else:
+        return CheckResult(
+            "fail",
+            {"error": "unknown_anomaly_method", "method": method, **observed},
+            threshold_out,
+            None,
+        )
+
+    failed = int(bad.sum())
+    observed["failed"] = failed
+    status = "pass" if failed == 0 else "fail"
+    return CheckResult(status, observed, threshold_out, df.index[bad])

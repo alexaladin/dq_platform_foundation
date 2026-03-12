@@ -108,6 +108,60 @@ def _reject(rule: dict[str, Any], reason: str) -> dict[str, Any]:
     return out
 
 
+def _validate_anomaly_params(params: dict[str, Any]) -> str | None:
+    method = params.get("method")
+    if method not in {"non_negative", "zscore", "iqr"}:
+        return "anomaly_detection.params.method must be one of: non_negative, zscore, iqr"
+
+    if method in {"zscore", "iqr"}:
+        thr = params.get("threshold")
+        try:
+            thr_f = float(thr)
+        except Exception:
+            return f"anomaly_detection.params.threshold must be numeric for method={method}"
+        if thr_f <= 0:
+            return "anomaly_detection.params.threshold must be > 0"
+
+    direction = params.get("direction")
+    if direction is not None and direction not in {"low", "high", "both"}:
+        return "anomaly_detection.params.direction must be one of: low, high, both"
+
+    min_hard = params.get("min_hard")
+    max_hard = params.get("max_hard")
+    if min_hard is not None and max_hard is not None:
+        try:
+            if float(min_hard) > float(max_hard):
+                return "anomaly_detection.params min_hard cannot be greater than max_hard"
+        except Exception:
+            return "anomaly_detection.params min_hard/max_hard must be numeric if provided"
+
+    return None
+
+
+def _is_business_non_negative_column(column: str, business_context: dict[str, Any] | None) -> bool:
+    if not business_context:
+        return False
+    cols_desc = business_context.get("columns_description")
+    if not isinstance(cols_desc, dict):
+        return False
+
+    raw_desc = cols_desc.get(column)
+    if not isinstance(raw_desc, str):
+        return False
+
+    desc = raw_desc.lower()
+    markers = (
+        "non-negative",
+        "non negative",
+        "must be non-negative",
+        "must be non negative",
+        "cannot be negative",
+        "can't be negative",
+        ">= 0",
+    )
+    return any(m in desc for m in markers)
+
+
 def validate_and_filter_ai_rules(
     *,
     ai_rules: list[dict[str, Any]],
@@ -116,6 +170,7 @@ def validate_and_filter_ai_rules(
     existing_rules: list[dict[str, Any]],
     max_rules_to_add: int = 15,
     min_ai_confidence: float | None = None,
+    business_context: dict[str, Any] | None = None,
 ) -> PatchDecision:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -185,65 +240,25 @@ def validate_and_filter_ai_rules(
                 continue
 
         if rtype == "anomaly_detection":
+            reason = _validate_anomaly_params(params)
+            if reason is not None:
+                rejected.append(_reject(r, reason))
+                continue
+
             method = params.get("method")
-            allowed_methods = {"hard_bounds", "iqr", "zscore"}
-            if method not in allowed_methods:
-                rejected.append(
-                    _reject(
-                        r,
-                        "anomaly_detection.params.method must be one of hard_bounds|iqr|zscore",
-                    )
-                )
-                continue
-
-            direction = params.get("direction", "both")
-            if direction not in {"both", "high", "low"}:
-                rejected.append(
-                    _reject(r, "anomaly_detection.params.direction must be one of both|high|low")
-                )
-                continue
-
-            if method == "hard_bounds":
-                min_hard = params.get("min_hard")
-                max_hard = params.get("max_hard")
-                if min_hard is None and max_hard is None:
-                    rejected.append(
-                        _reject(
-                            r,
-                            "anomaly_detection hard_bounds requires min_hard and/or max_hard",
-                        )
-                    )
-                    continue
-                try:
-                    min_val = float(min_hard) if min_hard is not None else None
-                    max_val = float(max_hard) if max_hard is not None else None
-                except Exception:
-                    rejected.append(
-                        _reject(
-                            r, "anomaly_detection hard_bounds min_hard/max_hard must be numeric"
-                        )
-                    )
-                    continue
-                if min_val is not None and max_val is not None and min_val > max_val:
-                    rejected.append(
-                        _reject(r, "anomaly_detection hard_bounds min_hard must be <= max_hard")
-                    )
-                    continue
-
-            if method in {"iqr", "zscore"}:
-                thr = params.get("threshold")
-                try:
-                    thr_f = float(thr)
-                except Exception:
-                    rejected.append(
-                        _reject(r, "anomaly_detection iqr/zscore requires numeric threshold")
-                    )
-                    continue
-                if thr_f <= 0:
-                    rejected.append(
-                        _reject(r, "anomaly_detection iqr/zscore threshold must be > 0")
-                    )
-                    continue
+            col = r.get("column")
+            if (
+                isinstance(col, str)
+                and method in {"zscore", "iqr"}
+                and _is_business_non_negative_column(col, business_context)
+            ):
+                # Business semantics override statistical method for hard non-negative columns.
+                r = dict(r)
+                r["params"] = {"method": "non_negative"}
+                prior = str(r.get("rationale", "")).strip()
+                r["rationale"] = (
+                    (prior + " ") if prior else ""
+                ) + f"Method normalized to non_negative from {method} by business context."
 
         sig = _signature(r)
         # <-- this was failing because sig contained unhashables

@@ -38,80 +38,51 @@ rules:
   expectation:
     column: movement_id
   suggested_by: key_detection_engine
+- rule_id: C002
+  rule_type: completeness
+  severity: medium
+  expectation:
+    column: material_id
+  suggested_by: ai_patcher
+  ai_confidence: 0.98
+  ai_rationale: material_id is a critical foreign identifier, and its nearly complete
+    presence warrants a rule to detect sporadic nulls.
+  ai_evidence_used: 'Non_null_count: 499 out of 500.'
+- rule_id: C003
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: quantity
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Business process requires each movement to have a non-null quantity.
+  ai_evidence_used: '0% nulls in 500 rows; business context: ''number of moved units''.'
 - rule_id: R001
   rule_type: range
-  severity: medium
+  severity: high
   expectation:
     column: quantity
-    min: -5.0
+    min: 0.0
     max: 24.31
   suggested_by: ai_patcher
-  ai_confidence: 0.9
-  ai_rationale: Ensure quantity values fall within observed range.
-  ai_evidence_used: &id001
-    min: -5.0
-    max: 24.31
-    non_null_count: 500
-  ai_reasoning:
-    dataset_id: goods_movements
-    rule_type: range
-    column: quantity
-    status: accepted
-    provider_rationale: Ensure quantity values fall within observed range.
-    provider_evidence: *id001
-    validation_outcome: &id002
-      status: accepted
-      reject_reason: null
-      reject_reason_code: null
-    confidence_explanation: Provider confidence=0.9; keep under review in advisory
-      mode before production promotion.
-    business_rationale: Rule was suggested by AI patcher under current allowed rule
-      types.
-    statistical_rationale: Use provider rationale/evidence for details; no anomaly-specific
-      derivation applied.
-  ai_validation_outcome: *id002
+  ai_confidence: 0.98
+  ai_rationale: Business context and statistical profiling indicate quantity must
+    be non-negative (direction encoded elsewhere). Maximum based on observed profile.
+  ai_evidence_used: 'Business context: ''quantity must be non-negative''. Profiling:
+    min=-5.0 (data error), but p01=0.6497; so min=0.0 preferred.'
+- rule_id: C004
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_type
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: All records should have a movement_type to correctly interpret journal
+    entries.
+  ai_evidence_used: 0% nulls; 500 non-null entries.
 - rule_id: D001
   rule_type: domain
-  severity: medium
-  expectation:
-    column: plant
-    allowed_values:
-    - PL02
-    - PL01
-    - PL03
-  suggested_by: ai_patcher
-  ai_confidence: 0.8
-  ai_rationale: Restrict plant values to observed set.
-  ai_evidence_used: &id003
-    distinct_count: 3
-    top_values:
-    - - PL02
-      - 186
-    - - PL01
-      - 168
-    - - PL03
-      - 146
-  ai_reasoning:
-    dataset_id: goods_movements
-    rule_type: domain
-    column: plant
-    status: accepted
-    provider_rationale: Restrict plant values to observed set.
-    provider_evidence: *id003
-    validation_outcome: &id004
-      status: accepted
-      reject_reason: null
-      reject_reason_code: null
-    confidence_explanation: Provider confidence=0.8; keep under review in advisory
-      mode before production promotion.
-    business_rationale: Rule was suggested by AI patcher under current allowed rule
-      types.
-    statistical_rationale: Use provider rationale/evidence for details; no anomaly-specific
-      derivation applied.
-  ai_validation_outcome: *id004
-- rule_id: D002
-  rule_type: domain
-  severity: medium
+  severity: high
   expectation:
     column: movement_type
     allowed_values:
@@ -120,112 +91,108 @@ rules:
     - TRANSFER
     - MOVE
   suggested_by: ai_patcher
-  ai_confidence: 0.8
-  ai_rationale: Restrict movement_type values to observed set.
-  ai_evidence_used: &id005
-    distinct_count: 4
-    top_values:
-    - - RECEIPT
-      - 177
-    - - ISSUE
-      - 162
-    - - TRANSFER
-      - 160
-    - - MOVE
-      - 1
-  ai_reasoning:
-    dataset_id: goods_movements
-    rule_type: domain
-    column: movement_type
-    status: accepted
-    provider_rationale: Restrict movement_type values to observed set.
-    provider_evidence: *id005
-    validation_outcome: &id006
-      status: accepted
-      reject_reason: null
-      reject_reason_code: null
-    confidence_explanation: Provider confidence=0.8; keep under review in advisory
-      mode before production promotion.
-    business_rationale: Rule was suggested by AI patcher under current allowed rule
-      types.
-    statistical_rationale: Use provider rationale/evidence for details; no anomaly-specific
-      derivation applied.
-  ai_validation_outcome: *id006
+  ai_confidence: 0.99
+  ai_rationale: movement_type has a well-defined and limited set of possible values
+    per top_values.
+  ai_evidence_used: top_values includes exactly four types as per business semantics
+    and profile.
+- rule_id: C005
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: plant
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: plant is required for physical routing of goods.
+  ai_evidence_used: 0% nulls, 500 non-null entries.
+- rule_id: D002
+  rule_type: domain
+  severity: high
+  expectation:
+    column: plant
+    allowed_values:
+    - PL02
+    - PL01
+    - PL03
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: plant codes are limited to three known values.
+  ai_evidence_used: 'Distinct_count: 3; top_values strictly enumerate the allowed
+    set.'
+- rule_id: C006
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: movement_date is necessary to establish movement timing for all records.
+  ai_evidence_used: 0% nulls; 500/500 non-null.
 - rule_id: T001
   rule_type: date_not_in_future
   severity: high
   expectation:
     column: movement_date
   suggested_by: ai_patcher
-  ai_confidence: 0.85
-  ai_rationale: Ensure movement_date is not set in the future.
-  ai_evidence_used: &id007
-    non_null_count: 500
-  ai_reasoning:
-    dataset_id: goods_movements
-    rule_type: date_not_in_future
-    column: movement_date
-    status: accepted
-    provider_rationale: Ensure movement_date is not set in the future.
-    provider_evidence: *id007
-    validation_outcome: &id008
-      status: accepted
-      reject_reason: null
-      reject_reason_code: null
-    confidence_explanation: Provider confidence=0.85; keep under review in advisory
-      mode before production promotion.
-    business_rationale: Rule was suggested by AI patcher under current allowed rule
-      types.
-    statistical_rationale: Use provider rationale/evidence for details; no anomaly-specific
-      derivation applied.
-  ai_validation_outcome: *id008
-- rule_id: A001
-  rule_type: anomaly_detection
+  ai_confidence: 0.98
+  ai_rationale: Business context explicitly states movement_date cannot be in the
+    future.
+  ai_evidence_used: Explicit in deterministic context; supports validation against
+    future dates.
+- rule_id: C007
+  rule_type: completeness
   severity: high
   expectation:
-    column: quantity
-    method: zscore
-    threshold: 3
+    column: ts_load
   suggested_by: ai_patcher
-  ai_confidence: 0.75
-  ai_rationale: Detect anomalies in quantity using z-score method.
-  ai_evidence_used: &id009
-    mean: 9.722539999999999
-    distinct_count: 433
-    duplicate_count: 67
-    has_negative_values: true
-  ai_reasoning:
-    dataset_id: goods_movements
-    rule_type: anomaly_detection
+  ai_confidence: 1.0
+  ai_rationale: ts_load should always be present for every row as a technical row-load
+    timestamp.
+  ai_evidence_used: 0% nulls in profile.
+- rule_id: D003
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: ts_load
+    allowed_values:
+    - 2/26/2026
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: ts_load has a single observed allowed value and should not deviate
+    per profile.
+  ai_evidence_used: top_values shows exactly one date; platform baseline expects tight
+    control.
+- rule_id: C008
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: forecast_date
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: forecast_date is required for downstream scheduled logistics.
+  ai_evidence_used: 0% nulls, 500/500 non-null.
+- rule_id: D004
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: forecast_date
+    allowed_values:
+    - 2/26/2026
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Only a single forecast_date present; requires controlled value with
+    current dataset.
+  ai_evidence_used: top_values shows only one allowed value.
+- rule_id: A001
+  rule_type: anomaly_detection
+  severity: medium
+  expectation:
     column: quantity
-    status: accepted
-    provider_rationale: Detect anomalies in quantity using z-score method.
-    provider_evidence: *id009
-    validation_outcome: &id010
-      status: accepted
-      reject_reason: null
-      reject_reason_code: null
-    confidence_explanation: Provider confidence=0.75; keep under review in advisory
-      mode before production promotion.
-    business_rationale: quantity impacts data quality for goods_movements; anomalies
-      are surfaced in advisory mode for review.
-    statistical_rationale: zscore chosen to flag points far from the mean in standardized
-      units
-    threshold_basis: z-score threshold=3.0
-    assumption_flags:
-      non_negative_assumed: false
-    risk_of_false_positive: low
-    evidence:
-      row_count: 500
-      non_null_count: 500
-      null_pct: 0.0
-      observed_min: -5.0
-      observed_max: 24.31
-      observed_mean: 9.722539999999999
-      method: zscore
-      direction: both
-      matched_rows: 2
-      outlier_rate: 0.004
-      std: 4.626779803318935
-      threshold: 3.0
-  ai_validation_outcome: *id010
+    method: non_negative
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: Added from business context fallback when provider returned no anomaly
+    rule.
+  ai_evidence_used:
+    business_context: Number of moved units. Must be non-negative. Direction is encoded
+      by movement_type.

@@ -15,6 +15,20 @@ from dq_ai.types import AISuggestPatchResponse
 load_dotenv()
 
 
+def _parse_json_response(content: str) -> dict[str, Any]:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    return json.loads(text)
+
+
 class AzureOpenAIProvider(AIProviderBase):
     """
     Azure OpenAI Chat Completions (patch-mode).
@@ -74,9 +88,9 @@ class AzureOpenAIProvider(AIProviderBase):
             "For domain rules: infer allowed_values from top_values in column_candidates.domain. "
             "For date_not_in_future rules: only use column_candidates.date_not_in_future. "
             "For anomaly_detection rules: only use column_candidates.anomaly_detection. "
-            "Anomaly params must use one method from hard_bounds|iqr|zscore. "
-            "For hard_bounds include min_hard and/or max_hard. "
-            "For iqr/zscore include numeric threshold > 0. "
+            "For anomaly_detection.method choose one of: non_negative, zscore, iqr. "
+            "For zscore/iqr include numeric threshold > 0. "
+            "When deterministic_context.business_context is provided, prioritize those semantics over observed historical outliers. "
             "Output schema: {rules_to_add: [rule], rationale: string}. "
             "Each rule: {rule_type, column, severity, params, confidence, rationale, evidence_used}."
         )
@@ -101,6 +115,8 @@ class AzureOpenAIProvider(AIProviderBase):
                 "For domain rules: only suggest for columns in column_candidates.domain, using provided top_values as evidence.",
                 "For date_not_in_future rules: only suggest for columns in column_candidates.date_not_in_future.",
                 "For anomaly_detection rules: only suggest for columns in column_candidates.anomaly_detection.",
+                "Use deterministic_context.business_context.dataset_description and columns_description as primary business truth.",
+                "Use anomaly_detection.method=non_negative when business-safe lower bound is 0 (for example quantity-like fields).",
                 "Do not invent business-specific rules.",
             ],
         }
@@ -123,7 +139,7 @@ class AzureOpenAIProvider(AIProviderBase):
         tokens = usage.get("total_tokens")
 
         # Strict JSON parsing
-        parsed = json.loads(content)
+        parsed = _parse_json_response(content)
 
         latency_ms = int((time.time() - t0) * 1000)
         return AISuggestPatchResponse(

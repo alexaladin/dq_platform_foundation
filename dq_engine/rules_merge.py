@@ -92,10 +92,6 @@ def merge_rules_to_add(
             rule_obj["ai_rationale"] = r.get("rationale")
         if "evidence_used" in r:
             rule_obj["ai_evidence_used"] = r.get("evidence_used")
-        if "reasoning" in r:
-            rule_obj["ai_reasoning"] = r.get("reasoning")
-        if "validation_outcome" in r:
-            rule_obj["ai_validation_outcome"] = r.get("validation_outcome")
 
         rules.append(rule_obj)
 

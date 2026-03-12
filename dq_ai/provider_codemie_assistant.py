@@ -16,6 +16,20 @@ from dq_ai.types import AISuggestPatchResponse
 load_dotenv()
 
 
+def _parse_json_response(content: str) -> dict[str, Any]:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    return json.loads(text)
+
+
 @dataclass
 class _TokenCache:
     token: str
@@ -113,11 +127,9 @@ class CodeMieAssistantProvider(AIProviderBase):
             "For domain rules: infer allowed_values from top_values in column_candidates.domain. "
             "For date_not_in_future rules: only use column_candidates.date_not_in_future. "
             "For anomaly_detection rules: only use column_candidates.anomaly_detection. "
-            "Anomaly params must use one method from hard_bounds|iqr|zscore. "
-            "For hard_bounds include min_hard and/or max_hard. "
-            "For iqr/zscore include numeric threshold > 0. "
-            "If column_candidates.anomaly_detection is non-empty, propose at least one "
-            "anomaly_detection rule. "
+            "For anomaly_detection.method choose one of: non_negative, zscore, iqr. "
+            "For zscore/iqr include numeric threshold > 0. "
+            "When deterministic_context.business_context is provided, prioritize those semantics over observed historical outliers. "
             "Output schema: {rules_to_add: [rule], rationale: string}. "
             "Each rule: {rule_type, column, severity, params, confidence, rationale, evidence_used}."
         )
@@ -153,9 +165,8 @@ class CodeMieAssistantProvider(AIProviderBase):
             data = resp.json()
 
         generated = data.get("generated", "")
-        print(111, generated.replace("```json", ""))
         # We instruct assistant to return ONLY JSON in generated; parse strictly
-        parsed = json.loads(generated)
+        parsed = _parse_json_response(generated)
 
         latency_ms = int((time.time() - t0) * 1000)
 
