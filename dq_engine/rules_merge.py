@@ -67,6 +67,7 @@ def merge_rules_to_add(
             "date_not_in_future": "T",
             "freshness": "F",
             "referential_integrity": "K",
+            "anomaly_detection": "A",
         }
         rid_prefix = prefix_map.get(rule_type, "R")
         rid = next_rule_id(rules, prefix=rid_prefix)
@@ -91,6 +92,10 @@ def merge_rules_to_add(
             rule_obj["ai_rationale"] = r.get("rationale")
         if "evidence_used" in r:
             rule_obj["ai_evidence_used"] = r.get("evidence_used")
+        if "reasoning" in r:
+            rule_obj["ai_reasoning"] = r.get("reasoning")
+        if "validation_outcome" in r:
+            rule_obj["ai_validation_outcome"] = r.get("validation_outcome")
 
         rules.append(rule_obj)
 

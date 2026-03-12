@@ -154,3 +154,22 @@ def test_build_column_candidates_date_not_in_future():
     assert "created_at" in cand["date_not_in_future"]
     assert "event_dt" in cand["date_not_in_future"]
     assert "amount" not in cand["date_not_in_future"]
+
+
+def test_build_column_candidates_anomaly_detection_numeric_only():
+    """Anomaly candidates should include numeric columns with min/max/mean stats."""
+    df = pd.DataFrame(
+        {
+            "quantity": [1.0, 2.0, 3.0, -1.0],
+            "status": ["ok", "ok", "bad", "ok"],
+        }
+    )
+    prof = profile_df(df)
+    standards = {"ai_patcher": {}}
+
+    cand = build_column_candidates(prof, ["anomaly_detection"], standards)
+
+    assert "anomaly_detection" in cand
+    assert "quantity" in cand["anomaly_detection"]
+    assert "status" not in cand["anomaly_detection"]
+    assert cand["anomaly_detection"]["quantity"]["has_negative_values"] is True

@@ -155,3 +155,27 @@ Persist registry/results in tables
 Keep rule semantics and guardrails unchanged
 Reuse most of dq_engine and dq_ai logic with minimal interface changes
 python -m venv .venv
+
+## Anomaly Suggestion Mode (Advisory)
+
+The AI suggestion pipeline now supports an advisory-only `anomaly_detection` rule type.
+
+- Supported methods: `hard_bounds`, `iqr`, `zscore`
+- Rule generation: `scripts/ai_suggested_rules.py`
+- Execution safety: anomaly rules are suggested and persisted, but not auto-executed by `run_local.py`
+
+Examples:
+
+```bash
+# Single dataset
+python scripts/ai_suggested_rules.py --dataset goods_movements --ai mock
+
+# All datasets from config/datasets.yaml
+python scripts/ai_suggested_rules.py --all_datasets --ai mock
+```
+
+New advisory artifacts in `dq_results/ai_suggestions/`:
+
+- `*__suggest_rules_rationale.txt`
+- `*__anomaly_samples.csv`
+- `*__anomaly_summary.json`

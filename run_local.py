@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +12,28 @@ import yaml
 from dq_engine.execution import execute_ruleset
 from dq_engine.registry import load_rulesets_dir
 from dq_engine.scoring import summarize_run
+
+
+def _parse_dataset_filters(raw_values: Iterable[str] | None) -> set[str] | None:
+    """
+    Parse dataset argument(s) into a normalized set of dataset ids.
+
+    Supports forms like:
+      --dataset goods_movements
+      --dataset goods_movements invent_location
+      --dataset goods_movements,invent_location
+      --dataset [goods_movements]
+    """
+    if not raw_values:
+        return None
+
+    out: set[str] = set()
+    for raw in raw_values:
+        for token in str(raw).split(","):
+            cleaned = token.strip().strip("[]").strip().strip("\"'")
+            if cleaned:
+                out.add(cleaned)
+    return out or None
 
 
 def main():
@@ -23,22 +46,44 @@ def main():
     ap.add_argument("--rulesets_dir", default="dq_registry/rulesets", help="Rulesets directory")
     ap.add_argument("--results_dir", default="dq_results", help="Results directory")
     ap.add_argument("--max_samples", type=int, default=100, help="Max bad record samples per rule")
+    ap.add_argument(
+        "--dataset",
+        nargs="+",
+        default=None,
+        help=(
+            "Optional dataset_id filter. If omitted, all datasets from config are run. "
+            "Examples: --dataset goods_movements OR --dataset goods_movements invent_location"
+        ),
+    )
     args = ap.parse_args()
 
     root = Path(args.project_root).resolve()
 
     run_id = args.run_id or f"local_run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     datasets_cfg = yaml.safe_load((root / args.datasets_config).read_text(encoding="utf-8"))
+    selected_datasets = _parse_dataset_filters(args.dataset)
 
     # Load datasets
     datasets = {}
+    configured_ids = set()
     for ds in datasets_cfg.get("datasets", []):
         dsid = ds["dataset_id"]
+        configured_ids.add(dsid)
+        if selected_datasets is not None and dsid not in selected_datasets:
+            continue
         loc = root / ds["source_location"]
         if ds["source_type"].lower() == "csv":
             datasets[dsid] = pd.read_csv(loc)
         else:
             raise ValueError(f"Unsupported source_type for local POC: {ds['source_type']}")
+
+    if selected_datasets is not None:
+        missing = sorted(selected_datasets - configured_ids)
+        if missing:
+            raise SystemExit(
+                f"Requested dataset_id(s) not found in config: {missing}. "
+                f"Available: {sorted(configured_ids)}"
+            )
 
     # Load rulesets
     rulesets = load_rulesets_dir(root / args.rulesets_dir)

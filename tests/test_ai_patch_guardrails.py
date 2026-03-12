@@ -11,6 +11,7 @@ ALLOWED_TYPES = [
     "date_not_in_future",
     "freshness",
     "referential_integrity",
+    "anomaly_detection",
 ]
 
 
@@ -49,3 +50,62 @@ def test_rejects_multi_column_patch():
     assert len(decision.accepted) == 0
     assert len(decision.rejected) == 1
     assert "only single column" in decision.rejected[0].get("reject_reason", "")
+
+
+def test_accepts_anomaly_hard_bounds_rule():
+    decision = validate_and_filter_ai_rules(
+        ai_rules=[
+            {
+                "rule_type": "anomaly_detection",
+                "column": "quantity",
+                "params": {"method": "hard_bounds", "min_hard": 0},
+                "confidence": 0.8,
+            }
+        ],
+        allowed_rule_types=ALLOWED_TYPES,
+        dataset_columns={"quantity"},
+        existing_rules=[],
+    )
+
+    assert len(decision.accepted) == 1
+    assert len(decision.rejected) == 0
+
+
+def test_rejects_anomaly_missing_method():
+    decision = validate_and_filter_ai_rules(
+        ai_rules=[
+            {
+                "rule_type": "anomaly_detection",
+                "column": "quantity",
+                "params": {"threshold": 2.0},
+                "confidence": 0.8,
+            }
+        ],
+        allowed_rule_types=ALLOWED_TYPES,
+        dataset_columns={"quantity"},
+        existing_rules=[],
+    )
+
+    assert len(decision.accepted) == 0
+    assert len(decision.rejected) == 1
+    assert "method" in decision.rejected[0].get("reject_reason", "")
+
+
+def test_rejects_anomaly_non_positive_threshold():
+    decision = validate_and_filter_ai_rules(
+        ai_rules=[
+            {
+                "rule_type": "anomaly_detection",
+                "column": "quantity",
+                "params": {"method": "zscore", "threshold": 0},
+                "confidence": 0.8,
+            }
+        ],
+        allowed_rule_types=ALLOWED_TYPES,
+        dataset_columns={"quantity"},
+        existing_rules=[],
+    )
+
+    assert len(decision.accepted) == 0
+    assert len(decision.rejected) == 1
+    assert "threshold" in decision.rejected[0].get("reject_reason", "")

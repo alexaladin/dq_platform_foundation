@@ -73,6 +73,10 @@ class AzureOpenAIProvider(AIProviderBase):
             "For range rules: use min/max from column_candidates.range. "
             "For domain rules: infer allowed_values from top_values in column_candidates.domain. "
             "For date_not_in_future rules: only use column_candidates.date_not_in_future. "
+            "For anomaly_detection rules: only use column_candidates.anomaly_detection. "
+            "Anomaly params must use one method from hard_bounds|iqr|zscore. "
+            "For hard_bounds include min_hard and/or max_hard. "
+            "For iqr/zscore include numeric threshold > 0. "
             "Output schema: {rules_to_add: [rule], rationale: string}. "
             "Each rule: {rule_type, column, severity, params, confidence, rationale, evidence_used}."
         )
@@ -96,6 +100,7 @@ class AzureOpenAIProvider(AIProviderBase):
                 "For range rules: only suggest for columns in column_candidates.range.",
                 "For domain rules: only suggest for columns in column_candidates.domain, using provided top_values as evidence.",
                 "For date_not_in_future rules: only suggest for columns in column_candidates.date_not_in_future.",
+                "For anomaly_detection rules: only suggest for columns in column_candidates.anomaly_detection.",
                 "Do not invent business-specific rules.",
             ],
         }

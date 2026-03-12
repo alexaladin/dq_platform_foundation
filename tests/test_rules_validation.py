@@ -9,6 +9,7 @@ ALLOWED_TYPES = {
     "date_not_in_future",
     "freshness",
     "referential_integrity",
+    "anomaly_detection",
 }
 
 
@@ -25,6 +26,17 @@ def validate_rule(rule: dict) -> None:
         assert "column" in exp
         assert isinstance(exp["column"], str)
         assert exp["column"].strip()
+
+    if rule["rule_type"] == "anomaly_detection":
+        assert "column" in exp
+        assert isinstance(exp["column"], str)
+        assert "method" in exp
+        assert exp["method"] in {"hard_bounds", "iqr", "zscore"}
+        if exp["method"] in {"iqr", "zscore"}:
+            assert "threshold" in exp
+            assert float(exp["threshold"]) > 0
+        if exp["method"] == "hard_bounds":
+            assert "min_hard" in exp or "max_hard" in exp
 
     # domain specifics
     if rule["rule_type"] == "domain":
@@ -65,3 +77,16 @@ def test_validate_unknown_type_raises():
 def test_validate_domain_requires_allowed_values():
     with pytest.raises(AssertionError):
         validate_rule({"rule_type": "domain", "expectation": {"column": "status"}})
+
+
+def test_validate_good_anomaly_rule():
+    rule = {
+        "rule_type": "anomaly_detection",
+        "severity": "high",
+        "expectation": {
+            "column": "quantity",
+            "method": "hard_bounds",
+            "min_hard": 0,
+        },
+    }
+    validate_rule(rule)

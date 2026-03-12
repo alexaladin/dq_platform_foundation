@@ -20,6 +20,18 @@ def _is_range_candidate(col_prof: dict[str, Any]) -> bool:
     return has_numeric and has_min_max
 
 
+def _is_anomaly_candidate(col_prof: dict[str, Any]) -> bool:
+    """Check if column is suitable for anomaly_detection rules."""
+    dtype = str(col_prof.get("dtype", "")).lower()
+    has_numeric = any(t in dtype for t in ("int", "float", "number"))
+    has_min_max_mean = (
+        col_prof.get("min") is not None
+        and col_prof.get("max") is not None
+        and col_prof.get("mean") is not None
+    )
+    return has_numeric and has_min_max_mean
+
+
 def _is_domain_candidate(col_prof: dict[str, Any], threshold: int) -> bool:
     """Check if column is suitable for domain rules."""
     distinct = col_prof.get("distinct_count", 0)
@@ -41,6 +53,7 @@ def build_column_candidates(
     standards: dict[str, Any],
     max_range_candidates: int = 20,
     max_domain_candidates: int = 20,
+    max_anomaly_candidates: int = 20,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     """
     Build curated column candidates by rule type from profiling.
@@ -141,5 +154,40 @@ def build_column_candidates(
                     "non_null_count": col_prof.get("non_null_count"),
                 }
         candidates["date_not_in_future"] = date_cands
+
+    # Anomaly detection candidates
+    if "anomaly_detection" in allowed_rule_types:
+        anomaly_cands = {}
+        for col_name, col_prof in cols.items():
+            if _is_anomaly_candidate(col_prof):
+                min_v = col_prof.get("min")
+                max_v = col_prof.get("max")
+                mean_v = col_prof.get("mean")
+                range_width = None
+                if min_v is not None and max_v is not None:
+                    range_width = float(max_v) - float(min_v)
+
+                # Heuristic signal to guide LLM for hard-bounds candidates.
+                has_negative_values = bool(min_v is not None and float(min_v) < 0)
+
+                anomaly_cands[col_name] = {
+                    "dtype": col_prof.get("dtype"),
+                    "null_pct": col_prof.get("null_pct"),
+                    "non_null_count": col_prof.get("non_null_count"),
+                    "min": min_v,
+                    "max": max_v,
+                    "mean": mean_v,
+                    "range_width": range_width,
+                    "distinct_count": col_prof.get("distinct_count"),
+                    "duplicate_count": col_prof.get("duplicate_count"),
+                    "has_negative_values": has_negative_values,
+                }
+
+        sorted_anomaly = sorted(
+            anomaly_cands.items(),
+            key=lambda x: abs(x[1].get("range_width") or 0),
+            reverse=True,
+        )
+        candidates["anomaly_detection"] = dict(sorted_anomaly[:max_anomaly_candidates])
 
     return candidates
