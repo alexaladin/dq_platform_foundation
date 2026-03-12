@@ -34,15 +34,332 @@
             "type": "string"
           },
           "rule_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "schema",
+              "completeness",
+              "uniqueness",
+              "domain",
+              "range",
+              "date_not_in_future",
+              "freshness",
+              "referential_integrity",
+              "anomaly_detection"
+            ]
           },
           "severity": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
           },
           "expectation": {
             "type": "object"
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "schema"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "required_columns"
+                  ],
+                  "properties": {
+                    "required_columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "domain"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column",
+                    "allowed_values"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    },
+                    "allowed_values": {
+                      "type": "array",
+                      "minItems": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "range"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    },
+                    "min": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "max": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "anyOf": [
+                    {
+                      "required": [
+                        "min"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "max"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "completeness"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "uniqueness"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "date_not_in_future"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "freshness"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "ts_column",
+                    "max_age_days"
+                  ],
+                  "properties": {
+                    "ts_column": {
+                      "type": "string"
+                    },
+                    "max_age_days": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "anomaly_detection"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column",
+                    "method"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "hard_bounds",
+                        "iqr",
+                        "zscore"
+                      ]
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "both",
+                        "high",
+                        "low"
+                      ]
+                    },
+                    "threshold": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "min_hard": {
+                      "type": "number"
+                    },
+                    "max_hard": {
+                      "type": "number"
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "method": {
+                            "enum": [
+                              "iqr",
+                              "zscore"
+                            ]
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": [
+                          "threshold"
+                        ]
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "method": {
+                            "const": "hard_bounds"
+                          }
+                        }
+                      },
+                      "then": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "min_hard"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "max_hard"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

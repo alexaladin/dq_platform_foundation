@@ -86,6 +86,44 @@ class MockAIProvider(AIProviderBase):
                         }
                     )
 
+        # Anomaly detection suggestions
+        if "anomaly_detection" in allowed_rule_types:
+            for col, prof in column_candidates.get("anomaly_detection", {}).items():
+                mn = prof.get("min")
+                mx = prof.get("max")
+                if mn is not None and mn < 0:
+                    rules.append(
+                        {
+                            "rule_type": "anomaly_detection",
+                            "column": col,
+                            "severity": "high",
+                            "params": {
+                                "method": "hard_bounds",
+                                "direction": "both",
+                                "min_hard": 0,
+                            },
+                            "confidence": 0.8,
+                            "rationale": "Observed negative values; enforce non-negative hard bound.",
+                            "evidence_used": [f"min={mn}", f"max={mx}"],
+                        }
+                    )
+                else:
+                    rules.append(
+                        {
+                            "rule_type": "anomaly_detection",
+                            "column": col,
+                            "severity": "medium",
+                            "params": {
+                                "method": "iqr",
+                                "direction": "both",
+                                "threshold": 1.5,
+                            },
+                            "confidence": 0.65,
+                            "rationale": "Numeric column with stable range; monitor outliers using IQR.",
+                            "evidence_used": [f"min={mn}", f"max={mx}"],
+                        }
+                    )
+
         # Cap
         rules = rules[:max_rules_to_add]
 

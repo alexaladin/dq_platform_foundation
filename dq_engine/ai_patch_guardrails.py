@@ -144,7 +144,14 @@ def validate_and_filter_ai_rules(
                 continue
 
         # Column checks for column-based rules
-        col_rules = {"completeness", "uniqueness", "domain", "range", "date_not_in_future"}
+        col_rules = {
+            "completeness",
+            "uniqueness",
+            "domain",
+            "range",
+            "date_not_in_future",
+            "anomaly_detection",
+        }
         if rtype in col_rules:
             col = r.get("column")
             if col is None and isinstance(r.get("columns"), list):
@@ -176,6 +183,67 @@ def validate_and_filter_ai_rules(
             if "min" not in params and "max" not in params:
                 rejected.append(_reject(r, "range.params must include min and/or max"))
                 continue
+
+        if rtype == "anomaly_detection":
+            method = params.get("method")
+            allowed_methods = {"hard_bounds", "iqr", "zscore"}
+            if method not in allowed_methods:
+                rejected.append(
+                    _reject(
+                        r,
+                        "anomaly_detection.params.method must be one of hard_bounds|iqr|zscore",
+                    )
+                )
+                continue
+
+            direction = params.get("direction", "both")
+            if direction not in {"both", "high", "low"}:
+                rejected.append(
+                    _reject(r, "anomaly_detection.params.direction must be one of both|high|low")
+                )
+                continue
+
+            if method == "hard_bounds":
+                min_hard = params.get("min_hard")
+                max_hard = params.get("max_hard")
+                if min_hard is None and max_hard is None:
+                    rejected.append(
+                        _reject(
+                            r,
+                            "anomaly_detection hard_bounds requires min_hard and/or max_hard",
+                        )
+                    )
+                    continue
+                try:
+                    min_val = float(min_hard) if min_hard is not None else None
+                    max_val = float(max_hard) if max_hard is not None else None
+                except Exception:
+                    rejected.append(
+                        _reject(
+                            r, "anomaly_detection hard_bounds min_hard/max_hard must be numeric"
+                        )
+                    )
+                    continue
+                if min_val is not None and max_val is not None and min_val > max_val:
+                    rejected.append(
+                        _reject(r, "anomaly_detection hard_bounds min_hard must be <= max_hard")
+                    )
+                    continue
+
+            if method in {"iqr", "zscore"}:
+                thr = params.get("threshold")
+                try:
+                    thr_f = float(thr)
+                except Exception:
+                    rejected.append(
+                        _reject(r, "anomaly_detection iqr/zscore requires numeric threshold")
+                    )
+                    continue
+                if thr_f <= 0:
+                    rejected.append(
+                        _reject(r, "anomaly_detection iqr/zscore threshold must be > 0")
+                    )
+                    continue
 
         sig = _signature(r)
         # <-- this was failing because sig contained unhashables
