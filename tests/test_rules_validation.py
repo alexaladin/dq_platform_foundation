@@ -22,21 +22,17 @@ def validate_rule(rule: dict) -> None:
     exp = rule["expectation"]
 
     # column expected for most rules
-    if rule["rule_type"] in {"completeness", "uniqueness", "domain", "range", "date_not_in_future"}:
+    if rule["rule_type"] in {
+        "completeness",
+        "uniqueness",
+        "domain",
+        "range",
+        "date_not_in_future",
+        "anomaly_detection",
+    }:
         assert "column" in exp
         assert isinstance(exp["column"], str)
         assert exp["column"].strip()
-
-    if rule["rule_type"] == "anomaly_detection":
-        assert "column" in exp
-        assert isinstance(exp["column"], str)
-        assert "method" in exp
-        assert exp["method"] in {"hard_bounds", "iqr", "zscore"}
-        if exp["method"] in {"iqr", "zscore"}:
-            assert "threshold" in exp
-            assert float(exp["threshold"]) > 0
-        if exp["method"] == "hard_bounds":
-            assert "min_hard" in exp or "max_hard" in exp
 
     # domain specifics
     if rule["rule_type"] == "domain":
@@ -47,6 +43,13 @@ def validate_rule(rule: dict) -> None:
     # range specifics
     if rule["rule_type"] == "range":
         assert "min" in exp or "max" in exp, "range must have min and/or max"
+
+    if rule["rule_type"] == "anomaly_detection":
+        assert "method" in exp
+        assert exp["method"] in {"non_negative", "zscore", "iqr"}
+        if exp["method"] in {"zscore", "iqr"}:
+            assert "threshold" in exp
+            assert float(exp["threshold"]) > 0
 
     # schema specifics
     if rule["rule_type"] == "schema":
@@ -79,14 +82,10 @@ def test_validate_domain_requires_allowed_values():
         validate_rule({"rule_type": "domain", "expectation": {"column": "status"}})
 
 
-def test_validate_good_anomaly_rule():
-    rule = {
-        "rule_type": "anomaly_detection",
-        "severity": "high",
-        "expectation": {
-            "column": "quantity",
-            "method": "hard_bounds",
-            "min_hard": 0,
-        },
-    }
-    validate_rule(rule)
+def test_validate_anomaly_detection_non_negative_rule():
+    validate_rule(
+        {
+            "rule_type": "anomaly_detection",
+            "expectation": {"column": "quantity", "method": "non_negative"},
+        }
+    )

@@ -157,11 +157,11 @@ def test_build_column_candidates_date_not_in_future():
 
 
 def test_build_column_candidates_anomaly_detection_numeric_only():
-    """Anomaly candidates should include numeric columns with min/max/mean stats."""
+    """Anomaly candidates should include numeric columns and distribution stats."""
     df = pd.DataFrame(
         {
-            "quantity": [1.0, 2.0, 3.0, -1.0],
-            "status": ["ok", "ok", "bad", "ok"],
+            "quantity": [1, 2, 3, 4, -5, 6],
+            "status": ["A", "B", "A", "A", "B", "A"],
         }
     )
     prof = profile_df(df)
@@ -172,4 +172,4 @@ def test_build_column_candidates_anomaly_detection_numeric_only():
     assert "anomaly_detection" in cand
     assert "quantity" in cand["anomaly_detection"]
     assert "status" not in cand["anomaly_detection"]
-    assert cand["anomaly_detection"]["quantity"]["has_negative_values"] is True
+    assert "std" in cand["anomaly_detection"]["quantity"]

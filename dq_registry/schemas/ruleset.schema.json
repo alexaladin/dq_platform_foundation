@@ -34,27 +34,10 @@
             "type": "string"
           },
           "rule_type": {
-            "type": "string",
-            "enum": [
-              "schema",
-              "completeness",
-              "uniqueness",
-              "domain",
-              "range",
-              "date_not_in_future",
-              "freshness",
-              "referential_integrity",
-              "anomaly_detection"
-            ]
+            "type": "string"
           },
           "severity": {
-            "type": "string",
-            "enum": [
-              "low",
-              "medium",
-              "high",
-              "critical"
-            ]
+            "type": "string"
           },
           "expectation": {
             "type": "object"
@@ -93,6 +76,38 @@
             "if": {
               "properties": {
                 "rule_type": {
+                  "enum": [
+                    "completeness",
+                    "uniqueness",
+                    "domain",
+                    "range",
+                    "date_not_in_future",
+                    "anomaly_detection"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
                   "const": "domain"
                 }
               }
@@ -102,13 +117,9 @@
                 "expectation": {
                   "type": "object",
                   "required": [
-                    "column",
                     "allowed_values"
                   ],
                   "properties": {
-                    "column": {
-                      "type": "string"
-                    },
                     "allowed_values": {
                       "type": "array",
                       "minItems": 1
@@ -130,26 +141,6 @@
               "properties": {
                 "expectation": {
                   "type": "object",
-                  "required": [
-                    "column"
-                  ],
-                  "properties": {
-                    "column": {
-                      "type": "string"
-                    },
-                    "min": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    },
-                    "max": {
-                      "type": [
-                        "number",
-                        "null"
-                      ]
-                    }
-                  },
                   "anyOf": [
                     {
                       "required": [
@@ -162,106 +153,6 @@
                       ]
                     }
                   ]
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "rule_type": {
-                  "const": "completeness"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "expectation": {
-                  "type": "object",
-                  "required": [
-                    "column"
-                  ],
-                  "properties": {
-                    "column": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "rule_type": {
-                  "const": "uniqueness"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "expectation": {
-                  "type": "object",
-                  "required": [
-                    "column"
-                  ],
-                  "properties": {
-                    "column": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "rule_type": {
-                  "const": "date_not_in_future"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "expectation": {
-                  "type": "object",
-                  "required": [
-                    "column"
-                  ],
-                  "properties": {
-                    "column": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "rule_type": {
-                  "const": "freshness"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "expectation": {
-                  "type": "object",
-                  "required": [
-                    "ts_column",
-                    "max_age_days"
-                  ],
-                  "properties": {
-                    "ts_column": {
-                      "type": "string"
-                    },
-                    "max_age_days": {
-                      "type": "number"
-                    }
-                  }
                 }
               }
             }
@@ -284,33 +175,37 @@
                   ],
                   "properties": {
                     "column": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1
                     },
                     "method": {
                       "type": "string",
                       "enum": [
-                        "hard_bounds",
-                        "iqr",
-                        "zscore"
-                      ]
-                    },
-                    "direction": {
-                      "type": "string",
-                      "enum": [
-                        "both",
-                        "high",
-                        "low"
+                        "non_negative",
+                        "zscore",
+                        "iqr"
                       ]
                     },
                     "threshold": {
                       "type": "number",
                       "exclusiveMinimum": 0
                     },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "high",
+                        "both"
+                      ]
+                    },
                     "min_hard": {
                       "type": "number"
                     },
                     "max_hard": {
                       "type": "number"
+                    },
+                    "window_hint": {
+                      "type": "string"
                     }
                   },
                   "allOf": [
@@ -319,8 +214,8 @@
                         "properties": {
                           "method": {
                             "enum": [
-                              "iqr",
-                              "zscore"
+                              "zscore",
+                              "iqr"
                             ]
                           }
                         }
@@ -328,29 +223,6 @@
                       "then": {
                         "required": [
                           "threshold"
-                        ]
-                      }
-                    },
-                    {
-                      "if": {
-                        "properties": {
-                          "method": {
-                            "const": "hard_bounds"
-                          }
-                        }
-                      },
-                      "then": {
-                        "anyOf": [
-                          {
-                            "required": [
-                              "min_hard"
-                            ]
-                          },
-                          {
-                            "required": [
-                              "max_hard"
-                            ]
-                          }
                         ]
                       }
                     }

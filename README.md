@@ -9,7 +9,7 @@ The project is designed to stay portable to Databricks/Spark with minimal rewrit
 - Loads rulesets from `dq_registry/rulesets/*.yaml`
 - Executes deterministic DQ checks (`schema`, `completeness`, `uniqueness`, `range`, `domain`, `date_not_in_future`, `freshness`, `referential_integrity`)
 - Writes auditable run artifacts to `dq_results/`
-- Supports AI-assisted rule suggestion (Azure OpenAI / CodeMie / Mock) in patch mode
+- Supports AI-assisted rule suggestion (Azure OpenAI / CodeMie / Mock) in patch mode, including advisory `anomaly_detection` rules
 - Merges accepted AI rules safely through guardrails
 
 ## Repository Structure
@@ -61,7 +61,8 @@ The project is designed to stay portable to Databricks/Spark with minimal rewrit
    - Rule results: `dq_results/rule_results/`
    - Bad samples: `dq_results/bad_samples/`
    - Run summaries: `dq_results/run_summaries/`
-   - AI inputs/raw/accepted/rejected patches: `dq_results/ai_suggestions/`
+  - AI inputs/raw/accepted/rejected patches: `dq_results/ai_suggestions/`
+  - Advisory anomaly artifacts: `...__suggest_rules_rationale.txt`, `...__anomaly_samples.csv`, `...__anomaly_summary.json`
 
 ## Onboarding (New Team Members)
 
@@ -155,27 +156,3 @@ Persist registry/results in tables
 Keep rule semantics and guardrails unchanged
 Reuse most of dq_engine and dq_ai logic with minimal interface changes
 python -m venv .venv
-
-## Anomaly Suggestion Mode (Advisory)
-
-The AI suggestion pipeline now supports an advisory-only `anomaly_detection` rule type.
-
-- Supported methods: `hard_bounds`, `iqr`, `zscore`
-- Rule generation: `scripts/ai_suggested_rules.py`
-- Execution safety: anomaly rules are suggested and persisted, but not auto-executed by `run_local.py`
-
-Examples:
-
-```bash
-# Single dataset
-python scripts/ai_suggested_rules.py --dataset goods_movements --ai mock
-
-# All datasets from config/datasets.yaml
-python scripts/ai_suggested_rules.py --all_datasets --ai mock
-```
-
-New advisory artifacts in `dq_results/ai_suggestions/`:
-
-- `*__suggest_rules_rationale.txt`
-- `*__anomaly_samples.csv`
-- `*__anomaly_summary.json`

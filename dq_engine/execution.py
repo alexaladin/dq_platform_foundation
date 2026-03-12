@@ -9,6 +9,7 @@ import pandas as pd
 
 from .checks import (
     CheckResult,
+    check_anomaly_detection,
     check_completeness,
     check_date_not_in_future,
     check_domain,
@@ -28,6 +29,8 @@ CHECK_MAP = {
     "domain": "domain",
     "date_not_in_future": "date_not_in_future",
     "referential_integrity": "referential_integrity",
+    "freshness": "freshness",
+    "anomaly_detection": "anomaly_detection",
 }
 
 
@@ -104,6 +107,16 @@ def execute_ruleset(
                     exp.get("ts_column", "ts_load"),
                     int(exp.get("max_age_days", -1)),
                 )
+            elif rule_type == "anomaly_detection":
+                cr = check_anomaly_detection(
+                    df,
+                    exp["column"],
+                    str(exp.get("method", "")),
+                    str(exp.get("direction", "both")),
+                    exp.get("threshold"),
+                    exp.get("min_hard"),
+                    exp.get("max_hard"),
+                )
             else:
                 cr = CheckResult(
                     "fail",
@@ -126,6 +139,7 @@ def execute_ruleset(
             "domain",
             "date_not_in_future",
             "referential_integrity",
+            "anomaly_detection",
         ):
             sample_ref = save_bad_samples(
                 samples_dir,
