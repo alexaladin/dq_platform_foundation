@@ -34,13 +34,72 @@
             "type": "string"
           },
           "rule_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "schema",
+              "completeness",
+              "uniqueness",
+              "range",
+              "domain",
+              "date_not_in_future",
+              "freshness",
+              "referential_integrity",
+              "etl_validation"
+            ]
           },
           "severity": {
             "type": "string"
           },
+          "enabled": {
+            "type": "boolean",
+            "description": "When false, the rule is skipped during execution. Defaults to true when omitted."
+          },
+          "description": {
+            "type": "string"
+          },
+          "suggested_by": {
+            "type": "string"
+          },
+          "ai_confidence": {
+            "type": "number"
+          },
+          "ai_rationale": {
+            "type": "string"
+          },
           "expectation": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "sql_ref": {
+                "type": "array",
+                "description": "Required for etl_validation rules. Each item is a file reference or an inline SQL block.",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "oneOf": [
+                    {
+                      "required": ["file"],
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "description": "Relative path to a .sql file."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "required": ["inline_sql"],
+                      "properties": {
+                        "inline_sql": {
+                          "type": "string",
+                          "description": "Inline SQL text."
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
           }
         }
       }
