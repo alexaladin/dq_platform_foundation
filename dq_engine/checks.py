@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -352,6 +353,31 @@ class EtlRefResult:
     row_count: int  # number of rows returned; 0 = pass, >=1 = fail
     status: str  # "pass" or "fail"
     error: str | None = None
+    sample_rows: pd.DataFrame | None = None
+
+
+def _rewrite_count_query_to_rows(sql_text: str) -> str:
+    """Rewrite simple count(*) validation SQL to row-returning SQL.
+
+    Example:
+      SELECT COUNT(*) FROM t WHERE cond
+    becomes:
+      SELECT * FROM t WHERE cond
+    """
+    text = str(sql_text or "").strip().rstrip(";")
+    m = re.match(
+        r"(?is)^select\s+count\s*\(\s*(?:\*|1)\s*\)\s+from\s+(.+)$",
+        text,
+    )
+    if not m:
+        return sql_text
+
+    body = m.group(1).strip()
+    low = body.lower()
+    if " group by " in low or " having " in low:
+        return sql_text
+
+    return f"SELECT * FROM {body}"
 
 
 def check_etl_validation(
@@ -378,9 +404,22 @@ def check_etl_validation(
     for ref in sql_refs:
         try:
             sql_text, label = resolve_sql_ref(ref, base_path)
-            row_count = sql_runner.run(sql_text, tables)
+            sql_text = _rewrite_count_query_to_rows(sql_text)
+            if hasattr(sql_runner, "run_with_rows"):
+                rows_df = sql_runner.run_with_rows(sql_text, tables)
+                row_count = len(rows_df)
+            else:
+                rows_df = None
+                row_count = sql_runner.run(sql_text, tables)
             status = "pass" if row_count == 0 else "fail"
-            results.append(EtlRefResult(label=label, row_count=row_count, status=status))
+            results.append(
+                EtlRefResult(
+                    label=label,
+                    row_count=row_count,
+                    status=status,
+                    sample_rows=rows_df,
+                )
+            )
         except Exception as exc:
             results.append(
                 EtlRefResult(label=str(ref), row_count=-1, status="fail", error=str(exc))

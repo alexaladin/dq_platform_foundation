@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ CHECK_MAP = {
 
 
 def utc_now() -> str:
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def save_bad_samples(
@@ -58,6 +58,29 @@ def save_bad_samples(
     sample = sample[payload_cols]
     samples_dir.mkdir(parents=True, exist_ok=True)
     path = samples_dir / f"{run_id}__{dataset_id}__{rule_id}.csv"
+    sample.to_csv(path, index=False)
+    return str(path)
+
+
+def save_etl_bad_samples(
+    samples_dir: Path,
+    run_id: str,
+    dataset_id: str,
+    rule_id: str,
+    sql_ref_label: str,
+    sample_rows: pd.DataFrame | None,
+    max_samples: int = 100,
+) -> str | None:
+    if sample_rows is None or sample_rows.empty:
+        return None
+
+    sample = sample_rows.head(max_samples).copy()
+    payload_cols = sample.columns[: min(10, len(sample.columns))]
+    sample = sample[payload_cols]
+
+    safe_label = "".join(ch if ch.isalnum() else "_" for ch in sql_ref_label)
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    path = samples_dir / f"{run_id}__{dataset_id}__{rule_id}__{safe_label}.csv"
     sample.to_csv(path, index=False)
     return str(path)
 
@@ -83,7 +106,7 @@ def execute_ruleset(
 
     for rule in ruleset.rules:
         started = utc_now()
-        t0 = datetime.utcnow()
+        t0 = datetime.now(timezone.utc)
 
         rule_type = rule.rule_type
         exp = rule.expectation or {}
@@ -91,7 +114,7 @@ def execute_ruleset(
         # ---- enabled semantics: skip when explicitly False ----
         if rule.enabled is False:
             finished = utc_now()
-            exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+            exec_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
             results.append(
                 {
                     "run_id": run_id,
@@ -117,7 +140,7 @@ def execute_ruleset(
             sql_refs = exp.get("sql_ref") or []
             if not sql_refs:
                 finished = utc_now()
-                exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+                exec_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
                 results.append(
                     {
                         "run_id": run_id,
@@ -147,7 +170,18 @@ def execute_ruleset(
 
             for ref_result in ref_results:
                 finished = utc_now()
-                exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+                exec_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+                etl_sample_ref = None
+                if ref_result.status == "fail":
+                    etl_sample_ref = save_etl_bad_samples(
+                        samples_dir,
+                        run_id,
+                        dataset_id,
+                        rule.rule_id,
+                        ref_result.label,
+                        ref_result.sample_rows,
+                        max_samples=max_samples,
+                    )
                 results.append(
                     {
                         "run_id": run_id,
@@ -166,7 +200,7 @@ def execute_ruleset(
                             ensure_ascii=False,
                         ),
                         "threshold": json.dumps({"result_semantics": "0_rows_pass"}),
-                        "sample_ref": None,
+                        "sample_ref": etl_sample_ref,
                         "sql_ref": ref_result.label,
                         "started_at": started,
                         "finished_at": finished,
@@ -223,7 +257,7 @@ def execute_ruleset(
             cr = CheckResult("fail", {"error": str(e)}, exp, None)
 
         finished = utc_now()
-        exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+        exec_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
 
         sample_ref = None
         if cr.status == "fail" and rule_type in (
@@ -270,4 +304,3 @@ def execute_ruleset(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_res.to_csv(out_path, index=False)
     return df_res
-

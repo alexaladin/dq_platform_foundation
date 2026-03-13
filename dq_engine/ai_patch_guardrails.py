@@ -292,9 +292,18 @@ def validate_and_filter_ai_rules(
         # etl_validation: validate sql_ref shape
         if rtype == "etl_validation":
             exp = r.get("expectation") or {}
+            # Accept patch shape with params.sql_ref and normalize to expectation.
+            if (not isinstance(exp, dict) or not exp.get("sql_ref")) and isinstance(params, dict):
+                sql_refs_from_params = params.get("sql_ref")
+                if isinstance(sql_refs_from_params, list) and sql_refs_from_params:
+                    r = dict(r)
+                    r["expectation"] = {"sql_ref": sql_refs_from_params}
+                    exp = r["expectation"]
             sql_refs = exp.get("sql_ref")
             if not isinstance(sql_refs, list) or len(sql_refs) == 0:
-                rejected.append(_reject(r, "etl_validation.expectation.sql_ref must be a non-empty list"))
+                rejected.append(
+                    _reject(r, "etl_validation.expectation.sql_ref must be a non-empty list")
+                )
                 continue
             inline_count = 0
             valid_refs = True
@@ -304,7 +313,9 @@ def validate_and_filter_ai_rules(
                     valid_refs = False
                     break
                 if "file" not in ref and "inline_sql" not in ref:
-                    rejected.append(_reject(r, "each sql_ref item must have 'file' or 'inline_sql'"))
+                    rejected.append(
+                        _reject(r, "each sql_ref item must have 'file' or 'inline_sql'")
+                    )
                     valid_refs = False
                     break
                 if "inline_sql" in ref:
@@ -312,7 +323,9 @@ def validate_and_filter_ai_rules(
             if not valid_refs:
                 continue
             if inline_count > 1:
-                rejected.append(_reject(r, "at most one inline_sql item is allowed per etl_validation rule"))
+                rejected.append(
+                    _reject(r, "at most one inline_sql item is allowed per etl_validation rule")
+                )
                 continue
 
         sig = _signature(r)

@@ -7,6 +7,7 @@ Covers:
 - Execution: etl_validation dispatch, enabled semantics, SQL-level logging
 - Payload builder: build_etl_validation_payload, SQL construct extraction
 """
+
 from __future__ import annotations
 
 import json
@@ -153,6 +154,16 @@ def test_check_etl_validation_fail_when_rows_returned():
     assert results[0].row_count == 3
 
 
+def test_check_etl_validation_rewrites_count_query_to_row_query():
+    runner = SqlRunner()
+    df = pd.DataFrame({"id": [1, 2, 3]})
+    refs = [{"inline_sql": "SELECT COUNT(*) FROM df WHERE id < 0"}]
+    results = check_etl_validation(refs, {"df": df}, runner)
+    assert len(results) == 1
+    assert results[0].status == "pass"
+    assert results[0].row_count == 0
+
+
 def test_check_etl_validation_multiple_refs_independent():
     runner = SqlRunner()
     df = pd.DataFrame({"id": [1, 2, 3], "val": [10, None, 30]})
@@ -194,9 +205,7 @@ def test_check_etl_validation_file_ref(tmp_path: Path):
 
 def test_execute_etl_validation_pass(tmp_path: Path):
     df = pd.DataFrame({"id": [1, 2, 3]})
-    rule = _make_etl_rule(
-        sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE id < 0"}]
-    )
+    rule = _make_etl_rule(sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE id < 0"}])
     rs = _make_ruleset([rule])
     result_df = execute_ruleset("run1", rs, {"orders": df}, tmp_path)
     assert len(result_df) == 1
@@ -207,15 +216,28 @@ def test_execute_etl_validation_pass(tmp_path: Path):
 
 def test_execute_etl_validation_fail(tmp_path: Path):
     df = pd.DataFrame({"id": [1, 2, 3]})
-    rule = _make_etl_rule(
-        sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE id > 0"}]
-    )
+    rule = _make_etl_rule(sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE id > 0"}])
     rs = _make_ruleset([rule])
     result_df = execute_ruleset("run1", rs, {"orders": df}, tmp_path)
     assert len(result_df) == 1
     assert result_df.iloc[0]["status"] == "fail"
     observed = json.loads(result_df.iloc[0]["observed_value"])
     assert observed["row_count"] == 3
+
+
+def test_execute_etl_validation_fail_writes_bad_sample(tmp_path: Path):
+    df = pd.DataFrame({"id": [1, 2, 3]})
+    rule = _make_etl_rule(sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE id > 1"}])
+    rs = _make_ruleset([rule])
+    result_df = execute_ruleset("run1", rs, {"orders": df}, tmp_path)
+    assert len(result_df) == 1
+    assert result_df.iloc[0]["status"] == "fail"
+    sample_ref = result_df.iloc[0]["sample_ref"]
+    assert isinstance(sample_ref, str) and sample_ref.endswith(".csv")
+    sample_path = Path(sample_ref)
+    assert sample_path.exists()
+    sample_df = pd.read_csv(sample_path)
+    assert len(sample_df) == 2
 
 
 def test_execute_etl_validation_multiple_refs_emit_one_row_each(tmp_path: Path):
@@ -277,7 +299,9 @@ def test_execute_etl_validation_empty_sql_ref_fails(tmp_path: Path):
 
 def test_execute_enabled_true_runs_rule(tmp_path: Path):
     df = pd.DataFrame({"id": [1, 2]})
-    rule = _make_etl_rule(enabled=True, sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE 1=0"}])
+    rule = _make_etl_rule(
+        enabled=True, sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE 1=0"}]
+    )
     rs = _make_ruleset([rule])
     result_df = execute_ruleset("run1", rs, {"orders": df}, tmp_path)
     assert result_df.iloc[0]["status"] == "pass"
@@ -285,7 +309,9 @@ def test_execute_enabled_true_runs_rule(tmp_path: Path):
 
 def test_execute_enabled_missing_runs_rule(tmp_path: Path):
     df = pd.DataFrame({"id": [1, 2]})
-    rule = _make_etl_rule(enabled=None, sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE 1=0"}])
+    rule = _make_etl_rule(
+        enabled=None, sql_refs=[{"inline_sql": "SELECT id FROM orders WHERE 1=0"}]
+    )
     rs = _make_ruleset([rule])
     result_df = execute_ruleset("run1", rs, {"orders": df}, tmp_path)
     assert result_df.iloc[0]["status"] == "pass"

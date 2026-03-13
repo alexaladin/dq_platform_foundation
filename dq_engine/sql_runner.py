@@ -21,13 +21,16 @@ class SqlRunner:
                  0  => pass (no violations found)
                  ≥1 => fail (violations found)
         """
+        rows_df = self.run_with_rows(sql, tables)
+        return len(rows_df)
+
+    def run_with_rows(self, sql: str, tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Execute *sql* and return query result rows as a DataFrame."""
         conn = sqlite3.connect(":memory:")
         try:
             for name, df in tables.items():
                 df.to_sql(name, conn, if_exists="replace", index=False)
-            cursor = conn.execute(sql)
-            rows = cursor.fetchall()
-            return len(rows)
+            return pd.read_sql_query(sql, conn)
         finally:
             conn.close()
 
@@ -57,6 +60,4 @@ def resolve_sql_ref(ref: dict[str, Any], base_path: Path | None = None) -> tuple
         return load_sql_file(full_path), f"file:{file_path}"
     if "inline_sql" in ref:
         return ref["inline_sql"], "inline_sql"
-    raise ValueError(
-        f"sql_ref item must contain 'file' or 'inline_sql', got: {list(ref.keys())}"
-    )
+    raise ValueError(f"sql_ref item must contain 'file' or 'inline_sql', got: {list(ref.keys())}")
