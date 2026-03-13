@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -176,3 +177,67 @@ def build_column_candidates(
         candidates["anomaly_detection"] = anomaly_cands
 
     return candidates
+
+
+_ETL_CONSTRUCT_PATTERNS: dict[str, str] = {
+    "has_joins": r"\bJOIN\b",
+    "has_aggregations": r"\b(GROUP\s+BY|COUNT\s*\(|SUM\s*\(|AVG\s*\(|MAX\s*\(|MIN\s*\()\b",
+    "has_case": r"\bCASE\b",
+    "has_null_handling": r"\b(IS\s+NULL|IS\s+NOT\s+NULL|COALESCE\s*\(|NULLIF\s*\(|IFNULL\s*\()\b",
+    "has_cte": r"\bWITH\b",
+    "has_union": r"\bUNION\b",
+    "has_dedup": r"\b(DISTINCT|ROW_NUMBER|RANK|DENSE_RANK)\b",
+    "has_filter": r"\bWHERE\b",
+    "has_subquery": r"\(\s*SELECT\b",
+}
+
+
+def _extract_sql_constructs(sql: str) -> dict[str, bool]:
+    """Identify high-risk ETL constructs present in *sql*.
+
+    Returns a mapping of construct name to ``True`` / ``False``.
+    Constructs checked: joins, aggregations, CASE, null-handling,
+    CTEs, UNION, dedup logic, filters, and subqueries.
+    """
+    sql_upper = sql.upper()
+    return {
+        name: bool(re.search(pattern, sql_upper))
+        for name, pattern in _ETL_CONSTRUCT_PATTERNS.items()
+    }
+
+
+def build_etl_validation_payload(
+    dataset_id: str,
+    validation_sql: str,
+    existing_rules: list[dict[str, Any]] | None = None,
+    schema_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build an AI payload for ``etl_validation`` rule generation.
+
+    The payload includes:
+    - ``dataset_id``: target dataset identifier
+    - ``validation_sql``: the raw analyst-provided SQL
+    - ``sql_constructs``: detected high-risk ETL constructs in the SQL
+    - ``existing_rules``: (optional) current rules for dedup context
+    - ``schema_metadata``: (optional) column/type metadata
+
+    Args:
+        dataset_id:      Identifier of the dataset being validated.
+        validation_sql:  Analyst-provided validation SQL.
+        existing_rules:  Optional list of existing rule dicts for context.
+        schema_metadata: Optional dict with column/type info.
+
+    Returns:
+        Dict suitable for passing to the AI provider as payload context.
+    """
+    constructs = _extract_sql_constructs(validation_sql)
+    payload: dict[str, Any] = {
+        "dataset_id": dataset_id,
+        "validation_sql": validation_sql,
+        "sql_constructs": constructs,
+    }
+    if existing_rules is not None:
+        payload["existing_rules"] = existing_rules
+    if schema_metadata is not None:
+        payload["schema_metadata"] = schema_metadata
+    return payload

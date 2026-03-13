@@ -13,6 +13,7 @@ from .checks import (
     check_completeness,
     check_date_not_in_future,
     check_domain,
+    check_etl_validation,
     check_freshness,
     check_range,
     check_referential_integrity,
@@ -20,6 +21,7 @@ from .checks import (
     check_uniqueness,
 )
 from .registry import RuleSet
+from .sql_runner import SqlRunner
 
 CHECK_MAP = {
     "schema": "schema",
@@ -31,6 +33,7 @@ CHECK_MAP = {
     "referential_integrity": "referential_integrity",
     "freshness": "freshness",
     "anomaly_detection": "anomaly_detection",
+    "etl_validation": "etl_validation",
 }
 
 
@@ -65,6 +68,8 @@ def execute_ruleset(
     datasets: dict[str, pd.DataFrame],
     results_dir: Path,
     max_samples: int = 100,
+    sql_runner: SqlRunner | None = None,
+    sql_base_path: Path | None = None,
 ) -> pd.DataFrame:
     results: list[dict[str, Any]] = []
     samples_dir = results_dir / "bad_samples"
@@ -74,6 +79,7 @@ def execute_ruleset(
         raise ValueError(f"Dataset '{dataset_id}' not loaded. Available: {list(datasets.keys())}")
 
     df = datasets[dataset_id]
+    _sql_runner = sql_runner if sql_runner is not None else SqlRunner()
 
     for rule in ruleset.rules:
         started = utc_now()
@@ -82,6 +88,94 @@ def execute_ruleset(
         rule_type = rule.rule_type
         exp = rule.expectation or {}
 
+        # ---- enabled semantics: skip when explicitly False ----
+        if rule.enabled is False:
+            finished = utc_now()
+            exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+            results.append(
+                {
+                    "run_id": run_id,
+                    "dataset_id": dataset_id,
+                    "ruleset_version": ruleset.ruleset_version,
+                    "rule_id": rule.rule_id,
+                    "rule_type": rule_type,
+                    "severity": rule.severity,
+                    "status": "skipped",
+                    "observed_value": json.dumps({"skip_reason": "enabled=false"}),
+                    "threshold": json.dumps({}),
+                    "sample_ref": None,
+                    "sql_ref": None,
+                    "started_at": started,
+                    "finished_at": finished,
+                    "execution_ms": exec_ms,
+                }
+            )
+            continue
+
+        # ---- etl_validation: execute per SQL ref ----
+        if rule_type == "etl_validation":
+            sql_refs = exp.get("sql_ref") or []
+            if not sql_refs:
+                finished = utc_now()
+                exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+                results.append(
+                    {
+                        "run_id": run_id,
+                        "dataset_id": dataset_id,
+                        "ruleset_version": ruleset.ruleset_version,
+                        "rule_id": rule.rule_id,
+                        "rule_type": rule_type,
+                        "severity": rule.severity,
+                        "status": "fail",
+                        "observed_value": json.dumps({"error": "sql_ref is empty or missing"}),
+                        "threshold": json.dumps({}),
+                        "sample_ref": None,
+                        "sql_ref": None,
+                        "started_at": started,
+                        "finished_at": finished,
+                        "execution_ms": exec_ms,
+                    }
+                )
+                continue
+
+            ref_results = check_etl_validation(
+                sql_refs=sql_refs,
+                tables=datasets,
+                sql_runner=_sql_runner,
+                base_path=sql_base_path,
+            )
+
+            for ref_result in ref_results:
+                finished = utc_now()
+                exec_ms = int((datetime.utcnow() - t0).total_seconds() * 1000)
+                results.append(
+                    {
+                        "run_id": run_id,
+                        "dataset_id": dataset_id,
+                        "ruleset_version": ruleset.ruleset_version,
+                        "rule_id": rule.rule_id,
+                        "rule_type": rule_type,
+                        "severity": rule.severity,
+                        "status": ref_result.status,
+                        "observed_value": json.dumps(
+                            {
+                                "sql_ref": ref_result.label,
+                                "row_count": ref_result.row_count,
+                                **({"error": ref_result.error} if ref_result.error else {}),
+                            },
+                            ensure_ascii=False,
+                        ),
+                        "threshold": json.dumps({"result_semantics": "0_rows_pass"}),
+                        "sample_ref": None,
+                        "sql_ref": ref_result.label,
+                        "started_at": started,
+                        "finished_at": finished,
+                        "execution_ms": exec_ms,
+                    }
+                )
+            continue
+
+        # ---- standard rule types ----
         try:
             if rule_type == "schema":
                 cr = check_schema(df, exp.get("required_columns", []))
@@ -163,6 +257,7 @@ def execute_ruleset(
                 "observed_value": json.dumps(cr.observed, ensure_ascii=False),
                 "threshold": json.dumps(cr.threshold, ensure_ascii=False),
                 "sample_ref": sample_ref,
+                "sql_ref": None,
                 "started_at": started,
                 "finished_at": finished,
                 "execution_ms": exec_ms,
@@ -175,3 +270,4 @@ def execute_ruleset(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_res.to_csv(out_path, index=False)
     return df_res
+

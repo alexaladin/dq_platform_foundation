@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -341,3 +342,47 @@ def check_anomaly_detection(
     observed["failed"] = failed
     status = "pass" if failed == 0 else "fail"
     return CheckResult(status, observed, threshold_out, df.index[bad])
+
+
+@dataclass
+class EtlRefResult:
+    """Result for a single SQL reference within an etl_validation rule."""
+
+    label: str  # "file:<path>" or "inline_sql"
+    row_count: int  # number of rows returned; 0 = pass, >=1 = fail
+    status: str  # "pass" or "fail"
+    error: str | None = None
+
+
+def check_etl_validation(
+    sql_refs: list[dict[str, Any]],
+    tables: dict[str, pd.DataFrame],
+    sql_runner: Any,
+    base_path: Path | None = None,
+) -> list[EtlRefResult]:
+    """Execute each SQL reference and return a per-ref result list.
+
+    Semantics:
+        0 rows returned  => pass  (no violations)
+        ≥1 rows returned => fail  (violations found)
+
+    Args:
+        sql_refs:   List of sql_ref items from ``expectation.sql_ref``.
+        tables:     Dict of dataset_id -> DataFrame available for SQL execution.
+        sql_runner: Object with ``run(sql, tables) -> int`` interface.
+        base_path:  Base directory for resolving relative file paths.
+    """
+    from .sql_runner import resolve_sql_ref
+
+    results: list[EtlRefResult] = []
+    for ref in sql_refs:
+        try:
+            sql_text, label = resolve_sql_ref(ref, base_path)
+            row_count = sql_runner.run(sql_text, tables)
+            status = "pass" if row_count == 0 else "fail"
+            results.append(EtlRefResult(label=label, row_count=row_count, status=status))
+        except Exception as exc:
+            results.append(
+                EtlRefResult(label=str(ref), row_count=-1, status="fail", error=str(exc))
+            )
+    return results

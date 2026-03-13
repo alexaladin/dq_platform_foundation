@@ -33,6 +33,33 @@ def _freeze(v: Any) -> Any:
     return v
 
 
+def _normalize_sql_refs(rule: dict[str, Any]) -> tuple:
+    """
+    Normalize sql_ref list for dedup signature in etl_validation rules.
+    Returns a sorted, frozen tuple of sql_ref items.
+    """
+    exp = rule.get("expectation") or {}
+    sql_refs = exp.get("sql_ref") or []
+    if not isinstance(sql_refs, list):
+        return ()
+    # Normalize each ref: sort keys, strip whitespace from values
+    normalized = []
+    for ref in sql_refs:
+        if not isinstance(ref, dict):
+            continue
+        if "file" in ref:
+            normalized.append(("file", str(ref["file"]).strip()))
+        elif "inline_sql" in ref:
+            # Normalize whitespace for inline SQL dedup
+            normalized.append(("inline_sql", " ".join(str(ref["inline_sql"]).split())))
+    # Sort for order-insensitive dedup
+    try:
+        normalized.sort()
+    except Exception:
+        pass
+    return tuple(normalized)
+
+
 def _normalize_cols(rule_type: str | None, rule: dict[str, Any]) -> list[str]:
     """
     Normalize where columns live:
@@ -94,6 +121,8 @@ def _normalize_payload(rule_type: str | None, rule: dict[str, Any]) -> dict[str,
 
 def _signature(rule: dict[str, Any]) -> tuple:
     rule_type = rule.get("type") or rule.get("rule_type")
+    if rule_type == "etl_validation":
+        return (rule_type, _normalize_sql_refs(rule))
     cols = _normalize_cols(rule_type, rule)
     # Stable ordering
     cols_t = tuple(sorted(cols))
@@ -259,6 +288,32 @@ def validate_and_filter_ai_rules(
                 r["rationale"] = (
                     (prior + " ") if prior else ""
                 ) + f"Method normalized to non_negative from {method} by business context."
+
+        # etl_validation: validate sql_ref shape
+        if rtype == "etl_validation":
+            exp = r.get("expectation") or {}
+            sql_refs = exp.get("sql_ref")
+            if not isinstance(sql_refs, list) or len(sql_refs) == 0:
+                rejected.append(_reject(r, "etl_validation.expectation.sql_ref must be a non-empty list"))
+                continue
+            inline_count = 0
+            valid_refs = True
+            for ref in sql_refs:
+                if not isinstance(ref, dict):
+                    rejected.append(_reject(r, "each sql_ref item must be a dict"))
+                    valid_refs = False
+                    break
+                if "file" not in ref and "inline_sql" not in ref:
+                    rejected.append(_reject(r, "each sql_ref item must have 'file' or 'inline_sql'"))
+                    valid_refs = False
+                    break
+                if "inline_sql" in ref:
+                    inline_count += 1
+            if not valid_refs:
+                continue
+            if inline_count > 1:
+                rejected.append(_reject(r, "at most one inline_sql item is allowed per etl_validation rule"))
+                continue
 
         sig = _signature(r)
         # <-- this was failing because sig contained unhashables
