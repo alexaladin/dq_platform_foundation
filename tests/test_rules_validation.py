@@ -9,6 +9,7 @@ ALLOWED_TYPES = {
     "date_not_in_future",
     "freshness",
     "referential_integrity",
+    "anomaly_detection",
 }
 
 
@@ -21,7 +22,14 @@ def validate_rule(rule: dict) -> None:
     exp = rule["expectation"]
 
     # column expected for most rules
-    if rule["rule_type"] in {"completeness", "uniqueness", "domain", "range", "date_not_in_future"}:
+    if rule["rule_type"] in {
+        "completeness",
+        "uniqueness",
+        "domain",
+        "range",
+        "date_not_in_future",
+        "anomaly_detection",
+    }:
         assert "column" in exp
         assert isinstance(exp["column"], str)
         assert exp["column"].strip()
@@ -35,6 +43,13 @@ def validate_rule(rule: dict) -> None:
     # range specifics
     if rule["rule_type"] == "range":
         assert "min" in exp or "max" in exp, "range must have min and/or max"
+
+    if rule["rule_type"] == "anomaly_detection":
+        assert "method" in exp
+        assert exp["method"] in {"non_negative", "zscore", "iqr"}
+        if exp["method"] in {"zscore", "iqr"}:
+            assert "threshold" in exp
+            assert float(exp["threshold"]) > 0
 
     # schema specifics
     if rule["rule_type"] == "schema":
@@ -65,3 +80,12 @@ def test_validate_unknown_type_raises():
 def test_validate_domain_requires_allowed_values():
     with pytest.raises(AssertionError):
         validate_rule({"rule_type": "domain", "expectation": {"column": "status"}})
+
+
+def test_validate_anomaly_detection_non_negative_rule():
+    validate_rule(
+        {
+            "rule_type": "anomaly_detection",
+            "expectation": {"column": "quantity", "method": "non_negative"},
+        }
+    )

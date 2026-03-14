@@ -37,3 +37,7 @@ ai_patcher:
   enabled: true
   max_rules_to_add: 15
   min_confidence_to_accept: 0.6
+  anomaly:
+    enabled: true
+    max_rules_to_add: 5
+    sample_rows_per_rule: 50

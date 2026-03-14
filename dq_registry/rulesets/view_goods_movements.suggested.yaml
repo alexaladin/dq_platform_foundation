@@ -1,0 +1,214 @@
+dataset_id: view_goods_movements
+ruleset_version: 1
+owner_team: SupplyChain
+data_owner: owner@example.com
+rules:
+- rule_id: schema_0001
+  rule_type: schema
+  expectation:
+    required_columns:
+    - movement_id
+    - material_id
+    - quantity
+    - movement_type
+    - plant
+    - movement_date
+    - ts_load
+    - forecast_date
+    - material_name
+    - total_product_weight
+  severity: high
+  description: 'Deterministic schema: required columns from dataset config'
+  suggested_by: dataset_config
+- rule_id: freshness_0001
+  rule_type: freshness
+  expectation:
+    ts_column: ts_load
+    max_age_days: 10
+  severity: medium
+  description: 'Deterministic freshness: 10 days max age'
+  suggested_by: dataset_config
+- rule_id: U001
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: movement_id
+  suggested_by: key_detection_engine
+- rule_id: C001
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_id
+  suggested_by: key_detection_engine
+- rule_id: U002
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: quantity
+  suggested_by: key_detection_engine
+- rule_id: C002
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: quantity
+  suggested_by: key_detection_engine
+- rule_id: C003
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: material_id
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: material_id is crucial for downstream joins and analytics, and profiling
+    shows 0% nulls. Ensuring completeness avoids data pipeline failures.
+  ai_evidence_used: 'Profiling: material_id has 159 non-null out of 159 rows, null_pct
+    = 0.0.'
+- rule_id: C004
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_type
+  suggested_by: ai_patcher
+  ai_confidence: 0.96
+  ai_rationale: movement_type is critical for movement classification; 100% completeness
+    ensures reliability and prevents misclassification.
+  ai_evidence_used: 'Profiling: movement_type null_pct = 0.0.'
+- rule_id: C005
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: plant
+  suggested_by: ai_patcher
+  ai_confidence: 0.96
+  ai_rationale: Plant codes drive reporting granularity across locations. Completeness
+    ensures distributions aren't skewed and all plants are tracked.
+  ai_evidence_used: 'Profiling: plant null_pct = 0.0, non_null_count = 159 / 159.'
+- rule_id: C006
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 0.96
+  ai_rationale: movement_date captures the time dimension; completeness is essential
+    for timeline analysis and business audit requirements.
+  ai_evidence_used: 'Profiling: movement_date null_pct = 0.0, non_null_count = 159
+    / 159.'
+- rule_id: C007
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: ts_load
+  suggested_by: ai_patcher
+  ai_confidence: 0.96
+  ai_rationale: ts_load is the data refresh date. Completeness ensures freshness checks
+    are valid and system can alert for stale data.
+  ai_evidence_used: 'Profiling: ts_load null_pct = 0.0, non_null_count = 159 / 159.'
+- rule_id: C008
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: forecast_date
+  suggested_by: ai_patcher
+  ai_confidence: 0.96
+  ai_rationale: forecast_date is used for downstream estimates; completeness guards
+    against reporting or forecasting gaps.
+  ai_evidence_used: 'Profiling: forecast_date null_pct = 0.0, non_null_count = 159
+    / 159.'
+- rule_id: D001
+  rule_type: domain
+  severity: high
+  expectation:
+    column: movement_type
+    allowed_values:
+    - TRANSFER
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: movement_type is strictly configured for 'TRANSFER' by business logic
+    and profiling; domain check assures no contamination.
+  ai_evidence_used: 'Profiling: movement_type top_values only contains ''TRANSFER''.'
+- rule_id: D002
+  rule_type: domain
+  severity: high
+  expectation:
+    column: plant
+    allowed_values:
+    - PL02
+    - PL01
+    - PL03
+  suggested_by: ai_patcher
+  ai_confidence: 0.98
+  ai_rationale: Plant codes are limited and known; enforcing domain preserves integrity
+    and prevents mis-join or analysis failures.
+  ai_evidence_used: 'Profiling: plant top_values are ''PL02'', ''PL01'', ''PL03''.'
+- rule_id: D003
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: ts_load
+    allowed_values:
+    - 2/26/2026
+  suggested_by: ai_patcher
+  ai_confidence: 0.97
+  ai_rationale: Current load timestamp value is constant; enforcing prevents unexpected
+    variations or quality issues in ETL tracking.
+  ai_evidence_used: 'Profiling: ts_load top_values only contains ''2/26/2026''.'
+- rule_id: D004
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: forecast_date
+    allowed_values:
+    - 2/26/2026
+  suggested_by: ai_patcher
+  ai_confidence: 0.97
+  ai_rationale: Forecast date is constant across dataset. Enforcing prevents temporal
+    ambiguity and preserves alignment with business expectations.
+  ai_evidence_used: 'Profiling: forecast_date top_values only contains ''2/26/2026''.'
+- rule_id: R001
+  rule_type: range
+  severity: high
+  expectation:
+    column: quantity
+    min: -5.0
+    max: 24.31
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: quantity profiling shows all values within [-5.0, 24.31]; range check
+    ensures no outliers and aids early anomaly detection.
+  ai_evidence_used: 'Profiling: quantity min = -5.0, max = 24.31.'
+- rule_id: T001
+  rule_type: date_not_in_future
+  severity: high
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 0.98
+  ai_rationale: Critical for time consistency; movement_date must not be in the future
+    per business requirement.
+  ai_evidence_used: 'Business context: movement_date cannot be in the future.'
+- rule_id: A001
+  rule_type: anomaly_detection
+  severity: medium
+  expectation:
+    column: quantity
+    method: non_negative
+  suggested_by: ai_patcher
+  ai_confidence: 0.9
+  ai_rationale: Business logic requires quantity to be non-negative; anomaly detection
+    enforces this constraint robustly.
+  ai_evidence_used: 'Business context: ''Must be non-negative.'' Profiling: min observed
+    = -5.0 suggests enforcement needed.'
+- rule_id: E001
+  rule_type: etl_validation
+  severity: high
+  expectation:
+    sql_ref:
+    - inline_sql: select count(*) from view_goods_movements where movement_type <>
+        'TRANSFER'
+  suggested_by: ai_patcher
+  ai_confidence: 0.98
+  ai_rationale: Reinforces deterministic SQL filter where only movement_type = 'TRANSFER'
+    is expected.
+  ai_evidence_used: ETL context filter and business logic restricts movement_type
+    to 'TRANSFER'; validation ensures pipeline-leveled enforcement.

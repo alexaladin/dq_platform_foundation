@@ -16,6 +16,20 @@ from dq_ai.types import AISuggestPatchResponse
 load_dotenv()
 
 
+def _parse_json_response(content: str) -> dict[str, Any]:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    return json.loads(text)
+
+
 @dataclass
 class _TokenCache:
     token: str
@@ -112,8 +126,17 @@ class CodeMieAssistantProvider(AIProviderBase):
             "For range rules: use min/max from column_candidates.range. "
             "For domain rules: infer allowed_values from top_values in column_candidates.domain. "
             "For date_not_in_future rules: only use column_candidates.date_not_in_future. "
+            "For anomaly_detection rules: only use column_candidates.anomaly_detection. "
+            "For anomaly_detection.method choose one of: non_negative, zscore, iqr. "
+            "For zscore/iqr include numeric threshold > 0. "
+            "If etl_validation is in allowed_rule_types and deterministic_context.etl_validation_context is present, "
+            "you may propose etl_validation rules using expectation.sql_ref. "
+            "For etl_validation: expectation.sql_ref must be a non-empty list of items with either file or inline_sql; "
+            "at most one inline_sql item per rule. "
+            "For etl_validation SQL, return violating rows directly; do NOT use COUNT(*) style queries. "
+            "When deterministic_context.business_context is provided, prioritize those semantics over observed historical outliers. "
             "Output schema: {rules_to_add: [rule], rationale: string}. "
-            "Each rule: {rule_type, column, severity, params, confidence, rationale, evidence_used}."
+            "Each rule: {rule_type, severity, confidence, rationale, evidence_used, and either column+params or expectation}."
         )
 
         column_candidates = build_column_candidates(
@@ -147,9 +170,8 @@ class CodeMieAssistantProvider(AIProviderBase):
             data = resp.json()
 
         generated = data.get("generated", "")
-        print(111, generated.replace("```json", ""))
         # We instruct assistant to return ONLY JSON in generated; parse strictly
-        parsed = json.loads(generated)
+        parsed = _parse_json_response(generated)
 
         latency_ms = int((time.time() - t0) * 1000)
 

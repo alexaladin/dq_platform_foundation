@@ -5,6 +5,7 @@ import pandas as pd
 import yaml
 
 from dq_engine.checks import (
+    check_anomaly_detection,
     check_completeness,
     check_domain,
     check_freshness,
@@ -185,3 +186,59 @@ def test_freshness_pass():
     df = pd.DataFrame({"ts_load": ["2026-02-25T10:00:00Z"]})
     r = check_freshness(df, "ts_load", 2)
     assert r.status in ("pass", "fail")
+
+
+def test_anomaly_detection_hard_bounds_fails_on_negative_values():
+    df = pd.DataFrame({"quantity": [1, 2, -5, 3]})
+    r = check_anomaly_detection(
+        df,
+        column="quantity",
+        method="hard_bounds",
+        min_hard=0,
+    )
+    assert r.status == "fail"
+    assert r.observed["failed"] == 1
+
+
+def test_anomaly_detection_non_negative_fails_on_negative_values():
+    df = pd.DataFrame({"quantity": [1, 2, -5, 3]})
+    r = check_anomaly_detection(
+        df,
+        column="quantity",
+        method="non_negative",
+    )
+    assert r.status == "fail"
+    assert r.observed["failed"] == 1
+
+
+def test_anomaly_detection_iqr_detects_extreme_outlier():
+    df = pd.DataFrame({"x": [10, 11, 10, 12, 10, 150]})
+    r = check_anomaly_detection(
+        df,
+        column="x",
+        method="iqr",
+        threshold=1.5,
+        direction="high",
+    )
+    assert r.status == "fail"
+    assert r.observed["failed"] >= 1
+
+
+def test_anomaly_detection_zscore_detects_extreme_outlier():
+    df = pd.DataFrame({"x": [1, 1, 1, 1, 100]})
+    r = check_anomaly_detection(
+        df,
+        column="x",
+        method="zscore",
+        threshold=1.5,
+        direction="high",
+    )
+    assert r.status == "fail"
+    assert r.observed["failed"] >= 1
+
+
+def test_anomaly_detection_unknown_method_fails():
+    df = pd.DataFrame({"x": [1, 2, 3]})
+    r = check_anomaly_detection(df, column="x", method="unknown")
+    assert r.status == "fail"
+    assert r.observed.get("error") == "unknown_anomaly_method"

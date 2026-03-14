@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -24,6 +25,14 @@ def _is_domain_candidate(col_prof: dict[str, Any], threshold: int) -> bool:
     """Check if column is suitable for domain rules."""
     distinct = col_prof.get("distinct_count", 0)
     return 0 < distinct <= threshold
+
+
+def _is_anomaly_candidate(col_prof: dict[str, Any]) -> bool:
+    """Check if column is suitable for anomaly detection rules."""
+    dtype = str(col_prof.get("dtype", "")).lower()
+    has_numeric = any(t in dtype for t in ("int", "float", "number"))
+    has_stats = col_prof.get("min") is not None and col_prof.get("max") is not None
+    return has_numeric and has_stats
 
 
 def _format_top_values(top_values_dict: dict) -> list[list]:
@@ -52,6 +61,9 @@ def build_column_candidates(
         "completeness": {"col_name": {dtype, null_pct, non_null_count}},
         "uniqueness": {"col_name": {dtype, distinct_count, distinct_ratio_non_null, duplicate_count}},
         "date_not_in_future": {"col_name": {dtype, null_pct, non_null_count}},
+        "anomaly_detection": {
+            "col_name": {dtype, null_pct, non_null_count, min, max, mean, std, q1, q3, p01, p99}
+        },
     }
 
     Filtering logic:
@@ -60,6 +72,7 @@ def build_column_candidates(
     - completeness: all columns
     - uniqueness: distinct_ratio > threshold (from standards, default 0.8)
     - date_not_in_future: date-like columns by name or dtype
+    - anomaly_detection: numeric columns with distribution stats
     """
     ai_patcher_cfg = standards.get("ai_patcher", {}) or {}
     domain_threshold = int(ai_patcher_cfg.get("domain_threshold", 50))
@@ -142,4 +155,89 @@ def build_column_candidates(
                 }
         candidates["date_not_in_future"] = date_cands
 
+    # Anomaly detection candidates
+    if "anomaly_detection" in allowed_rule_types:
+        anomaly_cands = {}
+        for col_name, col_prof in cols.items():
+            if _is_anomaly_candidate(col_prof):
+                anomaly_cands[col_name] = {
+                    "dtype": col_prof.get("dtype"),
+                    "null_pct": col_prof.get("null_pct"),
+                    "non_null_count": col_prof.get("non_null_count"),
+                    "distinct_count": col_prof.get("distinct_count"),
+                    "min": col_prof.get("min"),
+                    "max": col_prof.get("max"),
+                    "mean": col_prof.get("mean"),
+                    "std": col_prof.get("std"),
+                    "q1": col_prof.get("q1"),
+                    "q3": col_prof.get("q3"),
+                    "p01": col_prof.get("p01"),
+                    "p99": col_prof.get("p99"),
+                }
+        candidates["anomaly_detection"] = anomaly_cands
+
     return candidates
+
+
+_ETL_CONSTRUCT_PATTERNS: dict[str, str] = {
+    "has_joins": r"\bJOIN\b",
+    "has_aggregations": r"\b(GROUP\s+BY|COUNT\s*\(|SUM\s*\(|AVG\s*\(|MAX\s*\(|MIN\s*\()\b",
+    "has_case": r"\bCASE\b",
+    "has_null_handling": r"\b(IS\s+NULL|IS\s+NOT\s+NULL|COALESCE\s*\(|NULLIF\s*\(|IFNULL\s*\()\b",
+    "has_cte": r"\bWITH\b",
+    "has_union": r"\bUNION\b",
+    "has_dedup": r"\b(DISTINCT|ROW_NUMBER|RANK|DENSE_RANK)\b",
+    "has_filter": r"\bWHERE\b",
+    "has_subquery": r"\(\s*SELECT\b",
+}
+
+
+def _extract_sql_constructs(sql: str) -> dict[str, bool]:
+    """Identify high-risk ETL constructs present in *sql*.
+
+    Returns a mapping of construct name to ``True`` / ``False``.
+    Constructs checked: joins, aggregations, CASE, null-handling,
+    CTEs, UNION, dedup logic, filters, and subqueries.
+    """
+    sql_upper = sql.upper()
+    return {
+        name: bool(re.search(pattern, sql_upper))
+        for name, pattern in _ETL_CONSTRUCT_PATTERNS.items()
+    }
+
+
+def build_etl_validation_payload(
+    dataset_id: str,
+    validation_sql: str,
+    existing_rules: list[dict[str, Any]] | None = None,
+    schema_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build an AI payload for ``etl_validation`` rule generation.
+
+    The payload includes:
+    - ``dataset_id``: target dataset identifier
+    - ``validation_sql``: the raw analyst-provided SQL
+    - ``sql_constructs``: detected high-risk ETL constructs in the SQL
+    - ``existing_rules``: (optional) current rules for dedup context
+    - ``schema_metadata``: (optional) column/type metadata
+
+    Args:
+        dataset_id:      Identifier of the dataset being validated.
+        validation_sql:  Analyst-provided validation SQL.
+        existing_rules:  Optional list of existing rule dicts for context.
+        schema_metadata: Optional dict with column/type info.
+
+    Returns:
+        Dict suitable for passing to the AI provider as payload context.
+    """
+    constructs = _extract_sql_constructs(validation_sql)
+    payload: dict[str, Any] = {
+        "dataset_id": dataset_id,
+        "validation_sql": validation_sql,
+        "sql_constructs": constructs,
+    }
+    if existing_rules is not None:
+        payload["existing_rules"] = existing_rules
+    if schema_metadata is not None:
+        payload["schema_metadata"] = schema_metadata
+    return payload

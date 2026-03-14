@@ -45,3 +45,13 @@ RULE RULES:
 \- rule\_id must be unique and descriptive
 
 \- Prefer fewer high-value rules over many trivial ones
+
+- If proposing `anomaly_detection` rules, use expectation:
+
+	- `column`: string
+
+	- `method`: one of `non_negative`, `zscore`, `iqr`
+
+	- `threshold`: required and > 0 for `zscore`/`iqr`
+
+	- Optional: `direction` in `low|high|both`, `min_hard`, `max_hard`, `window_hint`

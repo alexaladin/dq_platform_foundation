@@ -48,15 +48,32 @@ def profile_df(df: pd.DataFrame, max_top: int = 10) -> dict[str, Any]:
         if is_numeric_dtype(s):
             sn = pd.to_numeric(s, errors="coerce")
             if sn.notna().any():
+                q = sn.quantile([0.01, 0.25, 0.75, 0.99])
                 col_prof.update(
                     {
                         "min": float(np.nanmin(sn.values)),
                         "max": float(np.nanmax(sn.values)),
                         "mean": float(np.nanmean(sn.values)),
+                        "std": float(np.nanstd(sn.values)),
+                        "p01": float(q.loc[0.01]) if 0.01 in q.index else None,
+                        "q1": float(q.loc[0.25]) if 0.25 in q.index else None,
+                        "q3": float(q.loc[0.75]) if 0.75 in q.index else None,
+                        "p99": float(q.loc[0.99]) if 0.99 in q.index else None,
                     }
                 )
             else:
-                col_prof.update({"min": None, "max": None, "mean": None})
+                col_prof.update(
+                    {
+                        "min": None,
+                        "max": None,
+                        "mean": None,
+                        "std": None,
+                        "p01": None,
+                        "q1": None,
+                        "q3": None,
+                        "p99": None,
+                    }
+                )
 
         prof["columns"][c] = col_prof
 

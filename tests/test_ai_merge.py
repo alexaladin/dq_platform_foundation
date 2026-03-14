@@ -22,3 +22,21 @@ def test_merge_appends_rules_with_ids_and_audit_fields():
     assert r0["suggested_by"] == "ai_patcher"
     assert r0["ai_confidence"] == 0.9
     assert r0["ai_rationale"] == "enum-like"
+
+
+def test_merge_anomaly_detection_rule_gets_anomaly_prefix():
+    doc = {"dataset_id": "x", "ruleset_version": 1, "rules": []}
+    rules = [
+        {
+            "rule_type": "anomaly_detection",
+            "column": "quantity",
+            "params": {"method": "non_negative"},
+        }
+    ]
+    merge_rules_to_add(ruleset_doc=doc, rules_to_add=rules, suggested_by="ai_patcher")
+
+    assert len(doc["rules"]) == 1
+    r0 = doc["rules"][0]
+    assert r0["rule_id"].startswith("A")
+    assert r0["expectation"]["column"] == "quantity"
+    assert r0["expectation"]["method"] == "non_negative"

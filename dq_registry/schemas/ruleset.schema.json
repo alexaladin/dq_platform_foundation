@@ -34,15 +34,263 @@
             "type": "string"
           },
           "rule_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "schema",
+              "completeness",
+              "uniqueness",
+              "range",
+              "domain",
+              "date_not_in_future",
+              "freshness",
+              "referential_integrity",
+              "etl_validation"
+            ]
           },
           "severity": {
             "type": "string"
           },
+          "enabled": {
+            "type": "boolean",
+            "description": "When false, the rule is skipped during execution. Defaults to true when omitted."
+          },
+          "description": {
+            "type": "string"
+          },
+          "suggested_by": {
+            "type": "string"
+          },
+          "ai_confidence": {
+            "type": "number"
+          },
+          "ai_rationale": {
+            "type": "string"
+          },
           "expectation": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "sql_ref": {
+                "type": "array",
+                "description": "Required for etl_validation rules. Each item is a file reference or an inline SQL block.",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "oneOf": [
+                    {
+                      "required": ["file"],
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "description": "Relative path to a .sql file."
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "required": ["inline_sql"],
+                      "properties": {
+                        "inline_sql": {
+                          "type": "string",
+                          "description": "Inline SQL text."
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "schema"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "required_columns"
+                  ],
+                  "properties": {
+                    "required_columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "enum": [
+                    "completeness",
+                    "uniqueness",
+                    "domain",
+                    "range",
+                    "date_not_in_future",
+                    "anomaly_detection"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "domain"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "allowed_values"
+                  ],
+                  "properties": {
+                    "allowed_values": {
+                      "type": "array",
+                      "minItems": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "range"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "anyOf": [
+                    {
+                      "required": [
+                        "min"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "max"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "rule_type": {
+                  "const": "anomaly_detection"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expectation": {
+                  "type": "object",
+                  "required": [
+                    "column",
+                    "method"
+                  ],
+                  "properties": {
+                    "column": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "non_negative",
+                        "zscore",
+                        "iqr"
+                      ]
+                    },
+                    "threshold": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "high",
+                        "both"
+                      ]
+                    },
+                    "min_hard": {
+                      "type": "number"
+                    },
+                    "max_hard": {
+                      "type": "number"
+                    },
+                    "window_hint": {
+                      "type": "string"
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "method": {
+                            "enum": [
+                              "zscore",
+                              "iqr"
+                            ]
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": [
+                          "threshold"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
       }
     }
   }

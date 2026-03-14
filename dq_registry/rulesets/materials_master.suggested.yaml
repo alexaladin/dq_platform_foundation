@@ -3,6 +3,22 @@ ruleset_version: 1
 owner_team: SupplyChain
 data_owner: owner@example.com
 rules:
+- rule_id: schema_0001
+  rule_type: schema
+  expectation:
+    required_columns:
+    - ts_load
+  severity: high
+  description: 'Deterministic schema: required columns from dataset config'
+  suggested_by: dataset_config
+- rule_id: freshness_0001
+  rule_type: freshness
+  expectation:
+    ts_column: ts_load
+    max_age_days: 2
+  severity: medium
+  description: 'Deterministic freshness: 2 days max age'
+  suggested_by: dataset_config
 - rule_id: U001
   rule_type: uniqueness
   severity: high
@@ -39,32 +55,77 @@ rules:
   expectation:
     column: material_name
   suggested_by: key_detection_engine
-- rule_id: U004
-  rule_type: uniqueness
+- rule_id: D001
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: ts_load
+    allowed_values:
+    - 2/23/2026
+  suggested_by: ai_patcher
+  ai_confidence: 0.7
+  ai_rationale: Low cardinality column with 1 distinct values.
+  ai_evidence_used:
+  - top_values=[['2/23/2026', 202]]
+- rule_id: D002
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: unit_of_measure
+    allowed_values:
+    - kg
+    - m
+    - g
+    - l
+    - pcs
+  suggested_by: ai_patcher
+  ai_confidence: 0.7
+  ai_rationale: Low cardinality column with 5 distinct values.
+  ai_evidence_used:
+  - top_values=[['kg', 45], ['m', 44], ['g', 44], ['l', 34], ['pcs', 34]]
+- rule_id: T001
+  rule_type: date_not_in_future
+  severity: medium
+  expectation:
+    column: created_at
+  suggested_by: ai_patcher
+  ai_confidence: 0.6
+  ai_rationale: Column name/dtype suggests datetime; prevent future dates.
+  ai_evidence_used:
+  - dtype=str
+- rule_id: T002
+  rule_type: date_not_in_future
+  severity: medium
+  expectation:
+    column: ts_load
+  suggested_by: ai_patcher
+  ai_confidence: 0.6
+  ai_rationale: Column name/dtype suggests datetime; prevent future dates.
+  ai_evidence_used:
+  - dtype=str
+- rule_id: R001
+  rule_type: range
+  severity: low
+  expectation:
+    column: weight
+    min: 0
+  suggested_by: ai_patcher
+  ai_confidence: 0.6
+  ai_rationale: Observed min=-10.0; suggest non-negative constraint.
+  ai_evidence_used:
+  - min=-10.0
+  - max=95.2
+- rule_id: A001
+  rule_type: anomaly_detection
   severity: high
   expectation:
-    column: material_id
+    column: weight
+    method: hard_bounds
+    direction: both
+    min_hard: 0
   suggested_by: ai_patcher
-  ai_confidence: 0.7867986798679868
-  ai_rationale: material_id is near-unique with a distinct ratio of 0.99 and max duplicate
-    count of 2.
+  ai_confidence: 0.8
+  ai_rationale: Observed negative values; enforce non-negative hard bound.
   ai_evidence_used:
-    row_count: 202
-    non_null_count: 202
-    null_pct: 0.0
-    distinct_count: 200
-    distinct_ratio_non_null: 0.9900990099009901
-    duplicate_count: 2
-    max_dup_count: 2
-- rule_id: C004
-  rule_type: completeness
-  severity: high
-  expectation:
-    column: material_id
-  suggested_by: ai_patcher
-  ai_confidence: 0.7867986798679868
-  ai_rationale: material_id has no null values, indicating high completeness.
-  ai_evidence_used:
-    row_count: 202
-    non_null_count: 202
-    null_pct: 0.0
+  - min=-10.0
+  - max=95.2

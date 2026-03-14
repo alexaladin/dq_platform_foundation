@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import yaml
 
-from dq_ai.payload_builder import build_column_candidates
+from dq_ai.payload_builder import build_column_candidates, build_etl_validation_payload
 from dq_ai.provider_azure_openai import AzureOpenAIProvider
 from dq_ai.provider_codemie_assistant import CodeMieAssistantProvider
 from dq_ai.provider_mock import MockAIProvider
@@ -27,6 +28,8 @@ ALLOWED_RULE_TYPES = [
     "date_not_in_future",
     "freshness",
     "referential_integrity",
+    "anomaly_detection",
+    "etl_validation",
 ]
 
 
@@ -135,19 +138,303 @@ def _add_key_validation_suggestions(suggested_doc: dict, standards: dict, profil
     return {"key_candidates": key_candidates, "key_rules_count": len(key_rules)}
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--project_root", default=".")
-    ap.add_argument("--dataset", required=True)
-    ap.add_argument("--ai", choices=["off", "mock", "azure", "codemie"], default="off")
-    ap.add_argument("--max_ai_rules", type=int, default=15)
-    ap.add_argument("--min_ai_confidence", type=float, default=None)
-    args = ap.parse_args()
+def _build_business_context(ds_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Collect compact business semantics from dataset config for LLM prompting."""
+    out: dict[str, Any] = {}
+    ds_desc = ds_cfg.get("dataset_description")
+    cols_desc = ds_cfg.get("columns_description")
 
-    root = Path(args.project_root).resolve()
-    dataset_id = args.dataset
+    if isinstance(ds_desc, str) and ds_desc.strip():
+        out["dataset_description"] = ds_desc.strip()
 
-    # Load dataset based on config
+    if isinstance(cols_desc, dict):
+        filtered = {
+            str(k): str(v).strip()
+            for k, v in cols_desc.items()
+            if isinstance(k, str) and isinstance(v, str) and v.strip()
+        }
+        if filtered:
+            out["columns_description"] = filtered
+
+    return out
+
+
+def _build_etl_validation_context(
+    *,
+    root: Path,
+    dataset_id: str,
+    ds_cfg: dict[str, Any],
+    profiling: dict[str, Any],
+    existing_rules: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Build optional ETL SQL context for AI when dataset config provides validation SQL."""
+    validation_sql = ds_cfg.get("validation_sql")
+    sql_file = ds_cfg.get("validation_sql_file")
+
+    if not isinstance(validation_sql, str) or not validation_sql.strip():
+        validation_sql = None
+
+    if isinstance(validation_sql, str) and validation_sql.strip():
+        # Backward-compatible behavior: allow passing a .sql path via validation_sql.
+        raw = validation_sql.strip()
+        looks_like_sql_file = raw.lower().endswith(".sql") and ("\n" not in raw and "\r" not in raw)
+        if looks_like_sql_file:
+            p = root / raw
+            if p.exists() and p.is_file():
+                validation_sql = p.read_text(encoding="utf-8")
+
+    if validation_sql is None and isinstance(sql_file, str) and sql_file.strip():
+        p = root / sql_file.strip()
+        if p.exists() and p.is_file():
+            validation_sql = p.read_text(encoding="utf-8")
+
+    if not validation_sql:
+        return None
+
+    cols = (profiling.get("columns") or {}) if isinstance(profiling, dict) else {}
+    schema_metadata = {
+        "columns": {
+            c: {"dtype": cp.get("dtype")}
+            for c, cp in cols.items()
+            if isinstance(c, str) and isinstance(cp, dict)
+        }
+    }
+
+    return build_etl_validation_payload(
+        dataset_id=dataset_id,
+        validation_sql=validation_sql,
+        existing_rules=existing_rules,
+        schema_metadata=schema_metadata,
+    )
+
+
+def _is_non_negative_text(text: str) -> bool:
+    s = text.lower()
+    markers = (
+        "non-negative",
+        "non negative",
+        "must be non-negative",
+        "must be non negative",
+        "cannot be negative",
+        "can't be negative",
+        ">= 0",
+    )
+    return any(m in s for m in markers)
+
+
+def _derive_business_anomaly_fallbacks(
+    *,
+    business_context: dict[str, Any],
+    column_candidates: dict[str, dict[str, dict[str, Any]]],
+    accepted_rules: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    cols_desc = business_context.get("columns_description")
+    if not isinstance(cols_desc, dict):
+        return []
+
+    anomaly_cols = set((column_candidates.get("anomaly_detection") or {}).keys())
+    already_has = {
+        r.get("column")
+        for r in accepted_rules
+        if (r.get("rule_type") or r.get("type")) == "anomaly_detection"
+    }
+
+    fallbacks: list[dict[str, Any]] = []
+    for col, desc in cols_desc.items():
+        if not isinstance(col, str) or not isinstance(desc, str):
+            continue
+        if col in already_has or col not in anomaly_cols:
+            continue
+        if not _is_non_negative_text(desc):
+            continue
+
+        fallbacks.append(
+            {
+                "rule_type": "anomaly_detection",
+                "column": col,
+                "severity": "medium",
+                "params": {"method": "non_negative"},
+                "confidence": 0.99,
+                "rationale": "Added from business context fallback when provider returned no anomaly rule.",
+                "evidence_used": {"business_context": desc},
+            }
+        )
+
+    return fallbacks
+
+
+def _derive_etl_validation_fallbacks(
+    *,
+    etl_validation_context: dict[str, Any] | None,
+    accepted_rules: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Ensure at least one etl_validation rule when ETL SQL context is available."""
+    if not isinstance(etl_validation_context, dict):
+        return []
+
+    validation_sql = etl_validation_context.get("validation_sql")
+    if not isinstance(validation_sql, str) or not validation_sql.strip():
+        return []
+
+    has_etl = any((r.get("rule_type") or r.get("type")) == "etl_validation" for r in accepted_rules)
+    if has_etl:
+        return []
+
+    return [
+        {
+            "rule_type": "etl_validation",
+            "severity": "high",
+            "expectation": {"sql_ref": [{"inline_sql": validation_sql.strip()}]},
+            "confidence": 0.99,
+            "rationale": "Added deterministic fallback from etl_validation_context when provider returned no etl_validation rule.",
+            "evidence_used": {
+                "sql_constructs": etl_validation_context.get("sql_constructs", {}),
+            },
+        }
+    ]
+
+
+def _has_rule_type(rules: list[dict[str, Any]], rule_type: str) -> bool:
+    return any((r.get("rule_type") or r.get("type")) == rule_type for r in rules)
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _compute_anomaly_mask(df: pd.DataFrame, rule: dict[str, Any]) -> pd.Series:
+    col = rule.get("column")
+    params = rule.get("params") or {}
+    if not isinstance(col, str) or col not in df.columns or not isinstance(params, dict):
+        return pd.Series(False, index=df.index)
+
+    method = params.get("method")
+    direction = params.get("direction", "both")
+    s = pd.to_numeric(df[col], errors="coerce")
+
+    if method == "non_negative":
+        mask = s < 0
+    elif method == "zscore":
+        threshold = _as_float(params.get("threshold"))
+        std = float(np.nanstd(s.values)) if s.notna().any() else 0.0
+        mean = float(np.nanmean(s.values)) if s.notna().any() else 0.0
+        if threshold is None or std <= 0:
+            return pd.Series(False, index=df.index)
+        z = (s - mean) / std
+        if direction == "low":
+            mask = z < (-threshold)
+        elif direction == "high":
+            mask = z > threshold
+        else:
+            mask = z.abs() > threshold
+    elif method == "iqr":
+        threshold = _as_float(params.get("threshold"))
+        if threshold is None:
+            return pd.Series(False, index=df.index)
+        q1 = s.quantile(0.25)
+        q3 = s.quantile(0.75)
+        iqr = q3 - q1
+        if pd.isna(iqr) or iqr <= 0:
+            return pd.Series(False, index=df.index)
+        low = q1 - threshold * iqr
+        high = q3 + threshold * iqr
+        if direction == "low":
+            mask = s < low
+        elif direction == "high":
+            mask = s > high
+        else:
+            mask = (s < low) | (s > high)
+    else:
+        return pd.Series(False, index=df.index)
+
+    min_hard = _as_float(params.get("min_hard"))
+    max_hard = _as_float(params.get("max_hard"))
+    if min_hard is not None:
+        mask = mask | (s < min_hard)
+    if max_hard is not None:
+        mask = mask | (s > max_hard)
+
+    return mask.fillna(False)
+
+
+def _build_anomaly_artifacts(
+    *,
+    df: pd.DataFrame,
+    accepted_rules: list[dict[str, Any]],
+    out_ai: Path,
+    ts: str,
+    dataset_id: str,
+    max_rows_per_rule: int = 50,
+) -> dict[str, Any]:
+    anomaly_rules = [
+        r for r in accepted_rules if (r.get("rule_type") or r.get("type")) == "anomaly_detection"
+    ]
+    summary: dict[str, Any] = {
+        "dataset_id": dataset_id,
+        "anomaly_rules_total": len(anomaly_rules),
+        "anomaly_rules_with_hits": 0,
+        "anomalous_rows_total": 0,
+        "rules": [],
+    }
+
+    samples: list[pd.DataFrame] = []
+
+    for idx, rule in enumerate(anomaly_rules, start=1):
+        mask = _compute_anomaly_mask(df, rule)
+        hits = int(mask.sum())
+        col = rule.get("column")
+        params = rule.get("params") or {}
+        method = params.get("method")
+        rule_key = f"A{idx:03d}_{col}_{method}"
+
+        summary["rules"].append(
+            {
+                "rule_key": rule_key,
+                "column": col,
+                "method": method,
+                "direction": params.get("direction", "both"),
+                "threshold": params.get("threshold"),
+                "hits": hits,
+                "confidence": rule.get("confidence"),
+            }
+        )
+
+        if hits <= 0:
+            continue
+
+        summary["anomaly_rules_with_hits"] += 1
+        summary["anomalous_rows_total"] += hits
+
+        sample = df.loc[mask].head(max_rows_per_rule).copy()
+        sample.insert(0, "anomaly_rule_key", rule_key)
+        sample.insert(1, "anomaly_column", col)
+        sample.insert(2, "anomaly_method", method)
+        samples.append(sample)
+
+    sample_path = out_ai / f"{ts}__{dataset_id}__anomaly_samples.csv"
+    if samples:
+        pd.concat(samples, axis=0).to_csv(sample_path, index=False)
+    else:
+        pd.DataFrame(columns=["anomaly_rule_key", "anomaly_column", "anomaly_method"]).to_csv(
+            sample_path, index=False
+        )
+
+    summary_path = out_ai / f"{ts}__{dataset_id}__anomaly_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return {
+        "sample_csv": str(sample_path),
+        "summary_json": str(summary_path),
+        "rules_total": summary["anomaly_rules_total"],
+        "rules_with_hits": summary["anomaly_rules_with_hits"],
+        "rows_total": summary["anomalous_rows_total"],
+    }
+
+
+def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> dict[str, Any]:
     cfg = yaml.safe_load((root / "config/datasets.yaml").read_text(encoding="utf-8"))
     ds_cfg = next(d for d in cfg["datasets"] if d["dataset_id"] == dataset_id)
     df = pd.read_csv(root / ds_cfg["source_location"])
@@ -158,7 +445,6 @@ def main():
     ruleset_path = root / "dq_registry" / "rulesets" / f"{dataset_id}.yaml"
     existing_yaml = read_existing_ruleset_yaml(ruleset_path)
 
-    # Start from existing ruleset OR minimal skeleton
     if existing_yaml:
         suggested_doc = yaml.safe_load(existing_yaml)
     else:
@@ -170,21 +456,19 @@ def main():
             "rules": [],
         }
 
-    # Increment version for suggested output
     suggested_doc["ruleset_version"] = next_ruleset_version(existing_yaml)
 
-    # --- Deterministic additions ---
     standards = _load_standards(root)
     _ensure_schema_required_columns(suggested_doc, ds_cfg, standards)
     _ensure_freshness_rule(suggested_doc, ds_cfg)
     key_artifacts = _add_key_validation_suggestions(suggested_doc, standards, profiling)
 
-    # --- AI patch-mode ---
     out_ai = root / "dq_results" / "ai_suggestions"
     out_ai.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     ai_artifacts: dict[str, Any] = {"enabled": args.ai, "accepted": 0, "rejected": 0}
+    anomaly_artifacts: dict[str, Any] = {}
 
     if args.ai != "off":
         if args.ai == "mock":
@@ -208,8 +492,20 @@ def main():
                 "ts_load_column": standards.get("ts_load_column", "ts_load"),
             },
         }
+        business_context = _build_business_context(ds_cfg)
+        if business_context:
+            deterministic_context["business_context"] = business_context
 
-        # Save prompt input (audit)
+        etl_validation_context = _build_etl_validation_context(
+            root=root,
+            dataset_id=dataset_id,
+            ds_cfg=ds_cfg,
+            profiling=profiling,
+            existing_rules=suggested_doc.get("rules", []),
+        )
+        if etl_validation_context:
+            deterministic_context["etl_validation_context"] = etl_validation_context
+
         column_candidates = build_column_candidates(
             profiling=profiling,
             allowed_rule_types=ALLOWED_RULE_TYPES,
@@ -241,9 +537,7 @@ def main():
             deterministic_context=deterministic_context,
             max_rules_to_add=args.max_ai_rules,
         )
-        print(ai_resp)
 
-        # Save raw model output
         (out_ai / f"{ts}__{dataset_id}__ai_patch_raw.json").write_text(
             json.dumps(
                 {
@@ -260,6 +554,10 @@ def main():
             ),
             encoding="utf-8",
         )
+        (out_ai / f"{ts}__{dataset_id}__suggest_rules_rationale.txt").write_text(
+            ai_resp.rationale or "",
+            encoding="utf-8",
+        )
 
         decision = validate_and_filter_ai_rules(
             ai_rules=ai_resp.rules_to_add,
@@ -268,7 +566,74 @@ def main():
             existing_rules=suggested_doc.get("rules", []),
             max_rules_to_add=args.max_ai_rules,
             min_ai_confidence=args.min_ai_confidence,
+            business_context=deterministic_context.get("business_context"),
         )
+
+        # ETL-focused second pass: explicitly request only etl_validation when ETL context exists
+        # and the first pass returned none.
+        if isinstance(
+            deterministic_context.get("etl_validation_context"), dict
+        ) and not _has_rule_type(decision.accepted, "etl_validation"):
+            etl_only_resp = provider.suggest_rules_patch(
+                dataset_id=dataset_id,
+                profiling=profiling,
+                standards=standards,
+                existing_ruleset_yaml=existing_yaml,
+                allowed_rule_types=["etl_validation"],
+                deterministic_context={
+                    "etl_validation_context": deterministic_context.get("etl_validation_context"),
+                    "business_context": deterministic_context.get("business_context"),
+                },
+                max_rules_to_add=min(args.max_ai_rules, 5),
+            )
+
+            etl_only_decision = validate_and_filter_ai_rules(
+                ai_rules=etl_only_resp.rules_to_add,
+                allowed_rule_types=ALLOWED_RULE_TYPES,
+                dataset_columns=dataset_columns,
+                existing_rules=(suggested_doc.get("rules", []) + decision.accepted),
+                max_rules_to_add=args.max_ai_rules,
+                min_ai_confidence=args.min_ai_confidence,
+                business_context=deterministic_context.get("business_context"),
+            )
+            decision.accepted.extend(etl_only_decision.accepted)
+            decision.rejected.extend(etl_only_decision.rejected)
+
+        etl_fallback_rules = _derive_etl_validation_fallbacks(
+            etl_validation_context=deterministic_context.get("etl_validation_context"),
+            accepted_rules=decision.accepted,
+        )
+        if etl_fallback_rules:
+            etl_decision = validate_and_filter_ai_rules(
+                ai_rules=etl_fallback_rules,
+                allowed_rule_types=ALLOWED_RULE_TYPES,
+                dataset_columns=dataset_columns,
+                existing_rules=(suggested_doc.get("rules", []) + decision.accepted),
+                max_rules_to_add=args.max_ai_rules,
+                min_ai_confidence=args.min_ai_confidence,
+                business_context=deterministic_context.get("business_context"),
+            )
+            decision.accepted.extend(etl_decision.accepted)
+            decision.rejected.extend(etl_decision.rejected)
+
+        # Ensure at least hard business anomaly rules are present when provider omits them.
+        fallback_rules = _derive_business_anomaly_fallbacks(
+            business_context=deterministic_context.get("business_context") or {},
+            column_candidates=column_candidates,
+            accepted_rules=decision.accepted,
+        )
+        if fallback_rules:
+            fb_decision = validate_and_filter_ai_rules(
+                ai_rules=fallback_rules,
+                allowed_rule_types=ALLOWED_RULE_TYPES,
+                dataset_columns=dataset_columns,
+                existing_rules=(suggested_doc.get("rules", []) + decision.accepted),
+                max_rules_to_add=args.max_ai_rules,
+                min_ai_confidence=args.min_ai_confidence,
+                business_context=deterministic_context.get("business_context"),
+            )
+            decision.accepted.extend(fb_decision.accepted)
+            decision.rejected.extend(fb_decision.rejected)
 
         (out_ai / f"{ts}__{dataset_id}__ai_patch_accepted.json").write_text(
             json.dumps(decision.accepted, indent=2, ensure_ascii=False),
@@ -286,22 +651,29 @@ def main():
             default_severity="medium",
         )
 
+        anomaly_artifacts = _build_anomaly_artifacts(
+            df=df,
+            accepted_rules=decision.accepted,
+            out_ai=out_ai,
+            ts=ts,
+            dataset_id=dataset_id,
+        )
+
         ai_artifacts["accepted"] = len(decision.accepted)
         ai_artifacts["rejected"] = len(decision.rejected)
 
-    # Save suggested ruleset YAML
     out_rules = root / "dq_registry" / "rulesets" / f"{dataset_id}.suggested.yaml"
     out_rules.write_text(
         yaml.safe_dump(suggested_doc, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
 
-    # Save summary
     summary = {
         "dataset_id": dataset_id,
         "ruleset_version": suggested_doc.get("ruleset_version"),
         "key_candidates": len(key_artifacts.get("key_candidates", [])),
         "ai": ai_artifacts,
+        "anomaly": anomaly_artifacts,
         "output_ruleset": str(out_rules),
     }
     (out_ai / f"{ts}__{dataset_id}__run_summary.json").write_text(
@@ -311,6 +683,28 @@ def main():
 
     print("Wrote:", out_rules)
     print("Summary:", json.dumps(summary, indent=2, ensure_ascii=False))
+    return summary
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--project_root", default=".")
+    ap.add_argument("--dataset", required=False)
+    ap.add_argument("--ai", choices=["off", "mock", "azure", "codemie"], default="off")
+    ap.add_argument("--max_ai_rules", type=int, default=15)
+    ap.add_argument("--min_ai_confidence", type=float, default=None)
+    args = ap.parse_args()
+
+    root = Path(args.project_root).resolve()
+    cfg = yaml.safe_load((root / "config/datasets.yaml").read_text(encoding="utf-8"))
+    dataset_ids = [d["dataset_id"] for d in cfg["datasets"]]
+    if args.dataset:
+        if args.dataset not in dataset_ids:
+            raise ValueError(f"dataset not found in config/datasets.yaml: {args.dataset}")
+        dataset_ids = [args.dataset]
+
+    all_summaries = [_process_dataset(root, dataset_id, args) for dataset_id in dataset_ids]
+    print("Processed datasets:", len(all_summaries))
 
 
 if __name__ == "__main__":

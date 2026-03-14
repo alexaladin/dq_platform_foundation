@@ -67,6 +67,8 @@ def merge_rules_to_add(
             "date_not_in_future": "T",
             "freshness": "F",
             "referential_integrity": "K",
+            "anomaly_detection": "A",
+            "etl_validation": "E",
         }
         rid_prefix = prefix_map.get(rule_type, "R")
         rid = next_rule_id(rules, prefix=rid_prefix)
