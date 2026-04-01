@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from dq_ai.payload_builder import build_column_candidates
+from dq_ai.payload_builder import build_column_candidates, build_etl_validation_payload
 from dq_ai.provider_azure_openai import AzureOpenAIProvider
 from dq_ai.provider_codemie_assistant import CodeMieAssistantProvider
 from dq_ai.provider_mock import MockAIProvider
@@ -29,6 +29,7 @@ ALLOWED_RULE_TYPES = [
     "freshness",
     "referential_integrity",
     "anomaly_detection",
+    "etl_validation",
 ]
 
 
@@ -158,6 +159,55 @@ def _build_business_context(ds_cfg: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _build_etl_validation_context(
+    *,
+    root: Path,
+    dataset_id: str,
+    ds_cfg: dict[str, Any],
+    profiling: dict[str, Any],
+    existing_rules: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Build optional ETL SQL context for AI when dataset config provides validation SQL."""
+    validation_sql = ds_cfg.get("validation_sql")
+    sql_file = ds_cfg.get("validation_sql_file")
+
+    if not isinstance(validation_sql, str) or not validation_sql.strip():
+        validation_sql = None
+
+    if isinstance(validation_sql, str) and validation_sql.strip():
+        # Backward-compatible behavior: allow passing a .sql path via validation_sql.
+        raw = validation_sql.strip()
+        looks_like_sql_file = raw.lower().endswith(".sql") and ("\n" not in raw and "\r" not in raw)
+        if looks_like_sql_file:
+            p = root / raw
+            if p.exists() and p.is_file():
+                validation_sql = p.read_text(encoding="utf-8")
+
+    if validation_sql is None and isinstance(sql_file, str) and sql_file.strip():
+        p = root / sql_file.strip()
+        if p.exists() and p.is_file():
+            validation_sql = p.read_text(encoding="utf-8")
+
+    if not validation_sql:
+        return None
+
+    cols = (profiling.get("columns") or {}) if isinstance(profiling, dict) else {}
+    schema_metadata = {
+        "columns": {
+            c: {"dtype": cp.get("dtype")}
+            for c, cp in cols.items()
+            if isinstance(c, str) and isinstance(cp, dict)
+        }
+    }
+
+    return build_etl_validation_payload(
+        dataset_id=dataset_id,
+        validation_sql=validation_sql,
+        existing_rules=existing_rules,
+        schema_metadata=schema_metadata,
+    )
+
+
 def _is_non_negative_text(text: str) -> bool:
     s = text.lower()
     markers = (
@@ -211,6 +261,41 @@ def _derive_business_anomaly_fallbacks(
         )
 
     return fallbacks
+
+
+def _derive_etl_validation_fallbacks(
+    *,
+    etl_validation_context: dict[str, Any] | None,
+    accepted_rules: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Ensure at least one etl_validation rule when ETL SQL context is available."""
+    if not isinstance(etl_validation_context, dict):
+        return []
+
+    validation_sql = etl_validation_context.get("validation_sql")
+    if not isinstance(validation_sql, str) or not validation_sql.strip():
+        return []
+
+    has_etl = any((r.get("rule_type") or r.get("type")) == "etl_validation" for r in accepted_rules)
+    if has_etl:
+        return []
+
+    return [
+        {
+            "rule_type": "etl_validation",
+            "severity": "high",
+            "expectation": {"sql_ref": [{"inline_sql": validation_sql.strip()}]},
+            "confidence": 0.99,
+            "rationale": "Added deterministic fallback from etl_validation_context when provider returned no etl_validation rule.",
+            "evidence_used": {
+                "sql_constructs": etl_validation_context.get("sql_constructs", {}),
+            },
+        }
+    ]
+
+
+def _has_rule_type(rules: list[dict[str, Any]], rule_type: str) -> bool:
+    return any((r.get("rule_type") or r.get("type")) == rule_type for r in rules)
 
 
 def _as_float(value: Any) -> float | None:
@@ -411,6 +496,16 @@ def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> d
         if business_context:
             deterministic_context["business_context"] = business_context
 
+        etl_validation_context = _build_etl_validation_context(
+            root=root,
+            dataset_id=dataset_id,
+            ds_cfg=ds_cfg,
+            profiling=profiling,
+            existing_rules=suggested_doc.get("rules", []),
+        )
+        if etl_validation_context:
+            deterministic_context["etl_validation_context"] = etl_validation_context
+
         column_candidates = build_column_candidates(
             profiling=profiling,
             allowed_rule_types=ALLOWED_RULE_TYPES,
@@ -473,6 +568,53 @@ def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> d
             min_ai_confidence=args.min_ai_confidence,
             business_context=deterministic_context.get("business_context"),
         )
+
+        # ETL-focused second pass: explicitly request only etl_validation when ETL context exists
+        # and the first pass returned none.
+        if isinstance(
+            deterministic_context.get("etl_validation_context"), dict
+        ) and not _has_rule_type(decision.accepted, "etl_validation"):
+            etl_only_resp = provider.suggest_rules_patch(
+                dataset_id=dataset_id,
+                profiling=profiling,
+                standards=standards,
+                existing_ruleset_yaml=existing_yaml,
+                allowed_rule_types=["etl_validation"],
+                deterministic_context={
+                    "etl_validation_context": deterministic_context.get("etl_validation_context"),
+                    "business_context": deterministic_context.get("business_context"),
+                },
+                max_rules_to_add=min(args.max_ai_rules, 5),
+            )
+
+            etl_only_decision = validate_and_filter_ai_rules(
+                ai_rules=etl_only_resp.rules_to_add,
+                allowed_rule_types=ALLOWED_RULE_TYPES,
+                dataset_columns=dataset_columns,
+                existing_rules=(suggested_doc.get("rules", []) + decision.accepted),
+                max_rules_to_add=args.max_ai_rules,
+                min_ai_confidence=args.min_ai_confidence,
+                business_context=deterministic_context.get("business_context"),
+            )
+            decision.accepted.extend(etl_only_decision.accepted)
+            decision.rejected.extend(etl_only_decision.rejected)
+
+        etl_fallback_rules = _derive_etl_validation_fallbacks(
+            etl_validation_context=deterministic_context.get("etl_validation_context"),
+            accepted_rules=decision.accepted,
+        )
+        if etl_fallback_rules:
+            etl_decision = validate_and_filter_ai_rules(
+                ai_rules=etl_fallback_rules,
+                allowed_rule_types=ALLOWED_RULE_TYPES,
+                dataset_columns=dataset_columns,
+                existing_rules=(suggested_doc.get("rules", []) + decision.accepted),
+                max_rules_to_add=args.max_ai_rules,
+                min_ai_confidence=args.min_ai_confidence,
+                business_context=deterministic_context.get("business_context"),
+            )
+            decision.accepted.extend(etl_decision.accepted)
+            decision.rejected.extend(etl_decision.rejected)
 
         # Ensure at least hard business anomaly rules are present when provider omits them.
         fallback_rules = _derive_business_anomaly_fallbacks(

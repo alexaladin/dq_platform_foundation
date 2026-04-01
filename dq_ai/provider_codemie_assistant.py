@@ -129,9 +129,14 @@ class CodeMieAssistantProvider(AIProviderBase):
             "For anomaly_detection rules: only use column_candidates.anomaly_detection. "
             "For anomaly_detection.method choose one of: non_negative, zscore, iqr. "
             "For zscore/iqr include numeric threshold > 0. "
+            "If etl_validation is in allowed_rule_types and deterministic_context.etl_validation_context is present, "
+            "you may propose etl_validation rules using expectation.sql_ref. "
+            "For etl_validation: expectation.sql_ref must be a non-empty list of items with either file or inline_sql; "
+            "at most one inline_sql item per rule. "
+            "For etl_validation SQL, return violating rows directly; do NOT use COUNT(*) style queries. "
             "When deterministic_context.business_context is provided, prioritize those semantics over observed historical outliers. "
             "Output schema: {rules_to_add: [rule], rationale: string}. "
-            "Each rule: {rule_type, column, severity, params, confidence, rationale, evidence_used}."
+            "Each rule: {rule_type, severity, confidence, rationale, evidence_used, and either column+params or expectation}."
         )
 
         column_candidates = build_column_candidates(

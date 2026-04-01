@@ -15,6 +15,7 @@ class Rule:
     expectation: dict[str, Any]
     suggested_by: str
     description: str | None = None
+    enabled: bool | None = None
     ai_confidence: float | None = None
     ai_rationale: str | None = None
     ai_evidence_used: dict[str, Any] | None = None
