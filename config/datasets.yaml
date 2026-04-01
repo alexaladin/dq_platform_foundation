@@ -49,8 +49,8 @@ datasets:
       forecast_date: "Estimated movement completion date."
       material_name: material\product name
       total_product_weight: weight of the moved material\product
-    source_type: csv
-    source_location: data/curated/view_goods_movements.csv
+    source_type: delta
+    source_location: hive_metastore.default.view_goods_movements
     owner_team: SupplyChain
     data_owner: owner@example.com
     sla_tier: gold

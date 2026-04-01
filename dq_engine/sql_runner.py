@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+# pyright: reportMissingImports=false
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,47 @@ class SqlRunner:
             return pd.read_sql_query(sql, conn)
         finally:
             conn.close()
+
+
+class SparkSqlRunner:
+    """SQL runner backed by Spark SQL for delta and mixed-source runs."""
+
+    def __init__(self, dataset_configs_by_id: dict[str, dict]):
+        self.dataset_configs_by_id = dataset_configs_by_id
+        self.spark = self._get_spark_session()
+
+    def _get_spark_session(self):
+        import importlib
+
+        try:
+            module_name = "pyspark" + ".sql"
+            spark_sql = importlib.import_module(module_name)
+            spark_session = spark_sql.SparkSession
+        except (ImportError, AttributeError) as exc:
+            raise RuntimeError(
+                "SparkSqlRunner requires pyspark/SparkSession for delta source execution."
+            ) from exc
+
+        return spark_session.getActiveSession() or spark_session.builder.getOrCreate()
+
+    def _register_tables(self, tables: dict[str, pd.DataFrame]) -> None:
+        for dataset_id, df in tables.items():
+            cfg = self.dataset_configs_by_id.get(dataset_id, {})
+            source_type = str(cfg.get("source_type", "csv")).lower().strip()
+            if source_type == "delta":
+                self.spark.table(str(cfg.get("source_location"))).createOrReplaceTempView(
+                    dataset_id
+                )
+            else:
+                self.spark.createDataFrame(df).createOrReplaceTempView(dataset_id)
+
+    def run(self, sql: str, tables: dict[str, pd.DataFrame]) -> int:
+        rows_df = self.run_with_rows(sql, tables)
+        return len(rows_df)
+
+    def run_with_rows(self, sql: str, tables: dict[str, pd.DataFrame]) -> pd.DataFrame:
+        self._register_tables(tables)
+        return self.spark.sql(sql).toPandas()
 
 
 def load_sql_file(path: str | Path) -> str:

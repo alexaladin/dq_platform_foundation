@@ -15,6 +15,7 @@ from dq_ai.provider_azure_openai import AzureOpenAIProvider
 from dq_ai.provider_codemie_assistant import CodeMieAssistantProvider
 from dq_ai.provider_mock import MockAIProvider
 from dq_engine.ai_patch_guardrails import validate_and_filter_ai_rules
+from dq_engine.datasets_config import index_datasets, load_dataset_frame, load_datasets_config
 from dq_engine.profiling import profile_df
 from dq_engine.rules_merge import merge_rules_to_add
 from dq_engine.suggest_key_candidates import suggest_key_candidates
@@ -434,10 +435,13 @@ def _build_anomaly_artifacts(
     }
 
 
-def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> dict[str, Any]:
-    cfg = yaml.safe_load((root / "config/datasets.yaml").read_text(encoding="utf-8"))
-    ds_cfg = next(d for d in cfg["datasets"] if d["dataset_id"] == dataset_id)
-    df = pd.read_csv(root / ds_cfg["source_location"])
+def _process_dataset(
+    root: Path,
+    dataset_id: str,
+    ds_cfg: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    df = load_dataset_frame(root, ds_cfg)
 
     profiling = profile_df(df)
     dataset_columns = set((profiling.get("columns") or {}).keys())
@@ -696,14 +700,19 @@ def main():
     args = ap.parse_args()
 
     root = Path(args.project_root).resolve()
-    cfg = yaml.safe_load((root / "config/datasets.yaml").read_text(encoding="utf-8"))
-    dataset_ids = [d["dataset_id"] for d in cfg["datasets"]]
+    cfg = load_datasets_config(root, "config/datasets.yaml")
+    cfg_by_id = index_datasets(cfg)
+
+    dataset_ids = list(cfg_by_id.keys())
     if args.dataset:
-        if args.dataset not in dataset_ids:
+        if args.dataset not in cfg_by_id:
             raise ValueError(f"dataset not found in config/datasets.yaml: {args.dataset}")
         dataset_ids = [args.dataset]
 
-    all_summaries = [_process_dataset(root, dataset_id, args) for dataset_id in dataset_ids]
+    all_summaries = [
+        _process_dataset(root, dataset_id, cfg_by_id[dataset_id], args)
+        for dataset_id in dataset_ids
+    ]
     print("Processed datasets:", len(all_summaries))
 
 

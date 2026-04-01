@@ -7,11 +7,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
+from dq_engine.datasets_config import (
+    has_delta_sources,
+    load_datasets_config,
+    load_selected_datasets,
+)
 from dq_engine.execution import execute_ruleset
 from dq_engine.registry import load_rulesets_dir
 from dq_engine.scoring import summarize_run
+from dq_engine.sql_runner import SparkSqlRunner
 
 
 def _parse_dataset_filters(raw_values: Iterable[str] | None) -> set[str] | None:
@@ -60,30 +65,11 @@ def main():
     root = Path(args.project_root).resolve()
 
     run_id = args.run_id or f"local_run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    datasets_cfg = yaml.safe_load((root / args.datasets_config).read_text(encoding="utf-8"))
+    datasets_cfg = load_datasets_config(root, args.datasets_config)
     selected_datasets = _parse_dataset_filters(args.dataset)
 
     # Load datasets
-    datasets = {}
-    configured_ids = set()
-    for ds in datasets_cfg.get("datasets", []):
-        dsid = ds["dataset_id"]
-        configured_ids.add(dsid)
-        if selected_datasets is not None and dsid not in selected_datasets:
-            continue
-        loc = root / ds["source_location"]
-        if ds["source_type"].lower() == "csv":
-            datasets[dsid] = pd.read_csv(loc)
-        else:
-            raise ValueError(f"Unsupported source_type for local POC: {ds['source_type']}")
-
-    if selected_datasets is not None:
-        missing = sorted(selected_datasets - configured_ids)
-        if missing:
-            raise SystemExit(
-                f"Requested dataset_id(s) not found in config: {missing}. "
-                f"Available: {sorted(configured_ids)}"
-            )
+    datasets, selected_cfg = load_selected_datasets(root, datasets_cfg, selected_datasets)
 
     # Load rulesets
     rulesets = load_rulesets_dir(root / args.rulesets_dir)
@@ -91,12 +77,19 @@ def main():
     # Execute rulesets for datasets
     all_results = []
     results_dir = root / args.results_dir
+    sql_runner = SparkSqlRunner(selected_cfg) if has_delta_sources(selected_cfg) else None
+
     for dsid in datasets.keys():
         if dsid not in rulesets:
             print(f"[WARN] No ruleset found for dataset '{dsid}', skipping.")
             continue
         df_res = execute_ruleset(
-            run_id, rulesets[dsid], datasets, results_dir, max_samples=args.max_samples
+            run_id,
+            rulesets[dsid],
+            datasets,
+            results_dir,
+            max_samples=args.max_samples,
+            sql_runner=sql_runner,
         )
         all_results.append(df_res)
 

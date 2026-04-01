@@ -112,7 +112,7 @@ config/datasets.yaml
 Per dataset supported keys:
 
 dataset_id
-source_type (currently csv)
+source_type (csv or delta)
 source_location
 owner_team
 data_owner
@@ -138,6 +138,12 @@ Optional:
 CODEMIE_AUTH_CLIENT_ID (default: codemie-sdk)
 CODEMIE_VERIFY_SSL (default: true)
 CODEMIE_TIMEOUT_S (default: 90)
+Databricks / Delta
+DATABRICKS_HOST (required outside Databricks runtime)
+DATABRICKS_TOKEN (required outside Databricks runtime)
+Optional guardrails:
+DQ_DELTA_WARN_ROW_THRESHOLD (default: 2000000)
+DQ_DELTA_WARN_MEMORY_MB (default: 512)
 Common Troubleshooting
 TypeError: Rule.__init__() got an unexpected keyword argument ...
 
