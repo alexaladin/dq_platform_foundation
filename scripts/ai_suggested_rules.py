@@ -298,6 +298,13 @@ def _derive_etl_validation_fallbacks(
 def _has_rule_type(rules: list[dict[str, Any]], rule_type: str) -> bool:
     return any((r.get("rule_type") or r.get("type")) == rule_type for r in rules)
 
+def _json_default(obj: Any) -> Any:
+    """Fallback JSON serializer: converts Timestamps and dates to ISO strings."""
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 def _as_float(value: Any) -> float | None:
     try:
@@ -424,8 +431,11 @@ def _build_anomaly_artifacts(
         )
 
     summary_path = out_ai / f"{ts}__{dataset_id}__anomaly_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    summary_path.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default),
+        encoding="utf-8",
+    )
     return {
         "sample_csv": str(sample_path),
         "summary_json": str(summary_path),
@@ -528,7 +538,7 @@ def _process_dataset(
         }
 
         (out_ai / f"{ts}__{dataset_id}__ai_prompt_input.json").write_text(
-            json.dumps(prompt_input, indent=2, ensure_ascii=False),
+            json.dumps(prompt_input, indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
         )
 
@@ -555,6 +565,7 @@ def _process_dataset(
                 },
                 indent=2,
                 ensure_ascii=False,
+                default=_json_default
             ),
             encoding="utf-8",
         )
@@ -640,11 +651,11 @@ def _process_dataset(
             decision.rejected.extend(fb_decision.rejected)
 
         (out_ai / f"{ts}__{dataset_id}__ai_patch_accepted.json").write_text(
-            json.dumps(decision.accepted, indent=2, ensure_ascii=False),
+            json.dumps(decision.accepted, indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
         )
         (out_ai / f"{ts}__{dataset_id}__ai_patch_rejected.json").write_text(
-            json.dumps(decision.rejected, indent=2, ensure_ascii=False),
+            json.dumps(decision.rejected, indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
         )
 
@@ -681,12 +692,12 @@ def _process_dataset(
         "output_ruleset": str(out_rules),
     }
     (out_ai / f"{ts}__{dataset_id}__run_summary.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False),
+        json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default),
         encoding="utf-8",
     )
 
     print("Wrote:", out_rules)
-    print("Summary:", json.dumps(summary, indent=2, ensure_ascii=False))
+    print("Summary:", json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default))
     return summary
 
 
@@ -702,13 +713,11 @@ def main():
     root = Path(args.project_root).resolve()
     cfg = load_datasets_config(root, "config/datasets.yaml")
     cfg_by_id = index_datasets(cfg)
-
     dataset_ids = list(cfg_by_id.keys())
     if args.dataset:
         if args.dataset not in cfg_by_id:
             raise ValueError(f"dataset not found in config/datasets.yaml: {args.dataset}")
         dataset_ids = [args.dataset]
-
     all_summaries = [
         _process_dataset(root, dataset_id, cfg_by_id[dataset_id], args)
         for dataset_id in dataset_ids
