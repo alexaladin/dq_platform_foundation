@@ -15,6 +15,7 @@ from dq_ai.provider_azure_openai import AzureOpenAIProvider
 from dq_ai.provider_codemie_assistant import CodeMieAssistantProvider
 from dq_ai.provider_mock import MockAIProvider
 from dq_engine.ai_patch_guardrails import validate_and_filter_ai_rules
+from dq_engine.datasets_config import index_datasets, load_dataset_frame, load_datasets_config
 from dq_engine.profiling import profile_df
 from dq_engine.rules_merge import merge_rules_to_add
 from dq_engine.suggest_key_candidates import suggest_key_candidates
@@ -297,6 +298,13 @@ def _derive_etl_validation_fallbacks(
 def _has_rule_type(rules: list[dict[str, Any]], rule_type: str) -> bool:
     return any((r.get("rule_type") or r.get("type")) == rule_type for r in rules)
 
+def _json_default(obj: Any) -> Any:
+    """Fallback JSON serializer: converts Timestamps and dates to ISO strings."""
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 def _as_float(value: Any) -> float | None:
     try:
@@ -423,8 +431,11 @@ def _build_anomaly_artifacts(
         )
 
     summary_path = out_ai / f"{ts}__{dataset_id}__anomaly_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    summary_path.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default),
+        encoding="utf-8",
+    )
     return {
         "sample_csv": str(sample_path),
         "summary_json": str(summary_path),
@@ -434,10 +445,13 @@ def _build_anomaly_artifacts(
     }
 
 
-def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> dict[str, Any]:
-    cfg = yaml.safe_load((root / "config/datasets.yaml").read_text(encoding="utf-8"))
-    ds_cfg = next(d for d in cfg["datasets"] if d["dataset_id"] == dataset_id)
-    df = pd.read_csv(root / ds_cfg["source_location"])
+def _process_dataset(
+    root: Path,
+    dataset_id: str,
+    ds_cfg: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    df = load_dataset_frame(root, ds_cfg)
 
     profiling = profile_df(df)
     dataset_columns = set((profiling.get("columns") or {}).keys())
@@ -524,7 +538,7 @@ def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> d
         }
 
         (out_ai / f"{ts}__{dataset_id}__ai_prompt_input.json").write_text(
-            json.dumps(prompt_input, indent=2, ensure_ascii=False),
+            json.dumps(prompt_input, indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
         )
 
@@ -551,6 +565,7 @@ def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> d
                 },
                 indent=2,
                 ensure_ascii=False,
+                default=_json_default
             ),
             encoding="utf-8",
         )
@@ -636,11 +651,11 @@ def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> d
             decision.rejected.extend(fb_decision.rejected)
 
         (out_ai / f"{ts}__{dataset_id}__ai_patch_accepted.json").write_text(
-            json.dumps(decision.accepted, indent=2, ensure_ascii=False),
+            json.dumps(decision.accepted, indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
         )
         (out_ai / f"{ts}__{dataset_id}__ai_patch_rejected.json").write_text(
-            json.dumps(decision.rejected, indent=2, ensure_ascii=False),
+            json.dumps(decision.rejected, indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
         )
 
@@ -677,12 +692,12 @@ def _process_dataset(root: Path, dataset_id: str, args: argparse.Namespace) -> d
         "output_ruleset": str(out_rules),
     }
     (out_ai / f"{ts}__{dataset_id}__run_summary.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False),
+        json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default),
         encoding="utf-8",
     )
 
     print("Wrote:", out_rules)
-    print("Summary:", json.dumps(summary, indent=2, ensure_ascii=False))
+    print("Summary:", json.dumps(summary, indent=2, ensure_ascii=False, default=_json_default))
     return summary
 
 
@@ -696,14 +711,17 @@ def main():
     args = ap.parse_args()
 
     root = Path(args.project_root).resolve()
-    cfg = yaml.safe_load((root / "config/datasets.yaml").read_text(encoding="utf-8"))
-    dataset_ids = [d["dataset_id"] for d in cfg["datasets"]]
+    cfg = load_datasets_config(root, "config/datasets.yaml")
+    cfg_by_id = index_datasets(cfg)
+    dataset_ids = list(cfg_by_id.keys())
     if args.dataset:
-        if args.dataset not in dataset_ids:
+        if args.dataset not in cfg_by_id:
             raise ValueError(f"dataset not found in config/datasets.yaml: {args.dataset}")
         dataset_ids = [args.dataset]
-
-    all_summaries = [_process_dataset(root, dataset_id, args) for dataset_id in dataset_ids]
+    all_summaries = [
+        _process_dataset(root, dataset_id, cfg_by_id[dataset_id], args)
+        for dataset_id in dataset_ids
+    ]
     print("Processed datasets:", len(all_summaries))
 
 

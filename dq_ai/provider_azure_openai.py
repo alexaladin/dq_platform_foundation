@@ -28,6 +28,14 @@ def _parse_json_response(content: str) -> dict[str, Any]:
             text = text[4:].strip()
     return json.loads(text)
 
+def _json_default(obj: Any) -> Any:
+    """Fallback JSON serializer: converts Timestamps and dates to ISO strings."""
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "item"):
+        return obj.item()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
 
 class AzureOpenAIProvider(AIProviderBase):
     """
@@ -132,7 +140,7 @@ class AzureOpenAIProvider(AIProviderBase):
         body = {
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=_json_default)},
             ],
             "temperature": 0.2,
         }

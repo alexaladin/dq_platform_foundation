@@ -40,53 +40,31 @@ rules:
   suggested_by: key_detection_engine
 - rule_id: C002
   rule_type: completeness
-  severity: high
+  severity: medium
   expectation:
     column: material_id
   suggested_by: ai_patcher
-  ai_confidence: 0.98
-  ai_rationale: Material code is required for interpreting movements; near-zero nulls
-    suggest high reliability.
-  ai_evidence_used: material_id has only 0.2% nulls, essential for movement tracking.
-- rule_id: C003
-  rule_type: completeness
-  severity: high
-  expectation:
-    column: quantity
-  suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: Quantity must always be specified for any goods movement, essential
-    for analytics and operations.
-  ai_evidence_used: quantity column has 0% nulls.
-- rule_id: C004
-  rule_type: completeness
-  severity: high
-  expectation:
-    column: movement_type
-  suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: Movement type is vital to interpret the direction and purpose of the
-    goods transaction.
-  ai_evidence_used: 0% missing, fixed set of types observed.
-- rule_id: C005
-  rule_type: completeness
+  ai_confidence: 0.95
+  ai_rationale: Ensures all movement records include a material identifier, critical
+    for tracking moved goods.
+  ai_evidence_used: material_id completeness profile reveals a low null percentage
+    (0.2%) over 500 records, making it a valuable high-coverage validation.
+- rule_id: D001
+  rule_type: domain
   severity: high
   expectation:
     column: plant
+    allowed_values:
+    - PL02
+    - PL01
+    - PL03
   suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: Plant information is critical for logistical traceability.
-  ai_evidence_used: No missing values in plant column.
-- rule_id: C006
-  rule_type: completeness
-  severity: high
-  expectation:
-    column: movement_date
-  suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: A movement must always have an associated date for audit trail validity.
-  ai_evidence_used: Profiling confirms 0% nulls.
-- rule_id: D001
+  ai_confidence: 0.98
+  ai_rationale: Only three valid plant codes are used; restricting values minimizes
+    the risk of invalid plant assignments.
+  ai_evidence_used: Profiling shows plant top_values strictly restricted to three
+    codes with no nulls.
+- rule_id: D002
   rule_type: domain
   severity: high
   expectation:
@@ -98,22 +76,57 @@ rules:
     - MOVE
   suggested_by: ai_patcher
   ai_confidence: 0.99
-  ai_rationale: Ensures only known, supported movement types are permitted.
-  ai_evidence_used: 'All values in top 4: RECEIPT, ISSUE, TRANSFER, MOVE; aligns with
-    business context.'
-- rule_id: D002
-  rule_type: domain
+  ai_rationale: Validates standard movement types, preventing rogue codes and supporting
+    downstream analytics.
+  ai_evidence_used: Profiling confirms four distinct movement_type codes populate
+    the entire dataset.
+- rule_id: R001
+  rule_type: range
   severity: high
   expectation:
-    column: plant
-    allowed_values:
-    - PL02
-    - PL01
-    - PL03
+    column: quantity
+    min: -5.0
+    max: 24.31
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: Constrains quantities to observed bounds, preventing negative or unexpectedly
+    large values. Business context says must be non-negative, but observed values
+    include negatives, so range reflects profile.
+  ai_evidence_used: Quantitative profiling reveals data spans from -5.0 to 24.31;
+    range rule makes outliers explicit.
+- rule_id: T001
+  rule_type: date_not_in_future
+  severity: high
+  expectation:
+    column: movement_date
   suggested_by: ai_patcher
   ai_confidence: 0.99
-  ai_rationale: Restricts plant codes to the known set, supporting operational consistency.
-  ai_evidence_used: plant shows three consistent values with no other top values.
+  ai_rationale: Movement dates must not exceed today's date; future dates break operational
+    integrity.
+  ai_evidence_used: Business context and candidate list mark movement_date as a non-future
+    field.
+- rule_id: C003
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: quantity
+  suggested_by: ai_patcher
+  ai_confidence: 0.99
+  ai_rationale: Every goods movement record must specify moved quantity for accurate
+    tracking.
+  ai_evidence_used: Null percent is 0.0% in profiling, ensuring rule will catch any
+    future omissions.
+- rule_id: C004
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: movement_date
+  suggested_by: ai_patcher
+  ai_confidence: 0.98
+  ai_rationale: Movement date is critical for timelines; completeness rules ensure
+    all movements are timestamped.
+  ai_evidence_used: Profiling shows 0.0% nulls and business context marks movement_date
+    as central.
 - rule_id: D003
   rule_type: domain
   severity: medium
@@ -122,9 +135,11 @@ rules:
     allowed_values:
     - 2/26/2026
   suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: Loaded timestamp is always the same, ensuring batch integrity.
-  ai_evidence_used: All 500 records have '2/26/2026' in ts_load.
+  ai_confidence: 0.9
+  ai_rationale: Restricts dataset load date to profiled value, defending against unintentional
+    dataset version mix.
+  ai_evidence_used: Profiling top_values of ts_load shows a single date value for
+    all records.
 - rule_id: D004
   rule_type: domain
   severity: medium
@@ -133,31 +148,11 @@ rules:
     allowed_values:
     - 2/26/2026
   suggested_by: ai_patcher
-  ai_confidence: 1.0
-  ai_rationale: Forecast date is constant per dataset, simplifying time-aligned analysis.
-  ai_evidence_used: Single top value (2/26/2026) for all forecast_date entries.
-- rule_id: R001
-  rule_type: range
-  severity: high
-  expectation:
-    column: quantity
-    min: 0.0
-    max: 24.31
-  suggested_by: ai_patcher
-  ai_confidence: 0.98
-  ai_rationale: Enforces non-negative units as required by business; catches miscoded
-    negatives.
-  ai_evidence_used: Business logic (must be non-negative); observed min of -5.0, but
-    min restricted to 0 due to context, max = 24.31 as per data.
-- rule_id: T001
-  rule_type: date_not_in_future
-  severity: high
-  expectation:
-    column: movement_date
-  suggested_by: ai_patcher
-  ai_confidence: 0.99
-  ai_rationale: Prevents registration of movements for dates not yet possible.
-  ai_evidence_used: 'Business context: movement_date cannot be in the future.'
+  ai_confidence: 0.9
+  ai_rationale: Ensures that forecast_date matches expected batch value, preventing
+    anomalies from ingestion timing.
+  ai_evidence_used: Profiling top_values of forecast_date reveals uniformity across
+    rows.
 - rule_id: A001
   rule_type: anomaly_detection
   severity: high
@@ -165,9 +160,10 @@ rules:
     column: quantity
     method: non_negative
   suggested_by: ai_patcher
-  ai_confidence: 0.97
-  ai_rationale: Highlights unusual quantity values far from the mean, suggesting data
-    entry errors or process issues. Method normalized to non_negative from zscore
-    by business context.
-  ai_evidence_used: quantity has std=4.63, z-score threshold 3.0 covers typical business
-    outliers.
+  ai_confidence: 0.98
+  ai_rationale: Detects anomalous quantity values far from average, useful for identifying
+    suspicious goods movements. Method normalized to non_negative from zscore by business
+    context.
+  ai_evidence_used: Profiling shows a considerable std (4.63); business context implies
+    non-negative quantities, but observed negative values present. Z-score > 3 will
+    highlight statistical outliers.

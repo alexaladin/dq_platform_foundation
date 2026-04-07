@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dq-platform/schemas/datasets.schema.json",
+  "title": "Dataset Sources Config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "datasets"
+  ],
+  "properties": {
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "dataset_id",
+          "source_type",
+          "source_location",
+          "owner_team",
+          "data_owner",
+          "sla_tier"
+        ],
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dataset_description": {
+            "type": "string"
+          },
+          "columns_description": {
+            "type": "object"
+          },
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "delta"
+            ]
+          },
+          "source_location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "owner_team": {
+            "type": "string",
+            "minLength": 1
+          },
+          "data_owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sla_tier": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ts_load_column": {
+            "type": "string"
+          },
+          "freshness_max_age_days": {
+            "type": "integer"
+          },
+          "freshness_severity": {
+            "type": "string"
+          },
+          "validation_sql": {
+            "type": "string"
+          },
+          "validation_sql_file": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "source_type": {
+                  "const": "delta"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "source_location": {
+                  "type": "string",
+                  "pattern": "^[^.]+\\.[^.]+\\.[^.]+$"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

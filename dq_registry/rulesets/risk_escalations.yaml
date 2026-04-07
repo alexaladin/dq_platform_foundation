@@ -1,0 +1,153 @@
+dataset_id: risk_escalations
+ruleset_version: 1
+owner_team: SupplyChain
+data_owner: owner@example.com
+rules:
+- rule_id: schema_0001
+  rule_type: schema
+  expectation:
+    required_columns:
+    - sourcePlant
+    - tenD
+    - createdAt
+    - region
+    - var
+    - shortage
+    - var_lag3_diff
+    - status
+  severity: high
+  description: 'Deterministic schema: required columns from dataset config'
+  suggested_by: dataset_config
+- rule_id: U001
+  rule_type: uniqueness
+  severity: high
+  expectation:
+    column: tenD
+  suggested_by: key_detection_engine
+- rule_id: C001
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: tenD
+  suggested_by: key_detection_engine
+- rule_id: C002
+  rule_type: completeness
+  severity: high
+  expectation:
+    column: sourcePlant
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Critical to track which plant each risk refers to; missing plant IDs
+    would undermine reporting and traceability.
+  ai_evidence_used: sourcePlant has 0% nulls; business description confirms its importance.
+- rule_id: D001
+  rule_type: domain
+  severity: high
+  expectation:
+    column: status
+    allowed_values:
+    - Pending
+    - Accepted
+    - Rejected
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Ensures risk status is limited to valid review stages as defined by
+    business rules.
+  ai_evidence_used: All existing status values are exactly ['Pending', 'Accepted',
+    'Rejected'] per profiling.
+- rule_id: D002
+  rule_type: domain
+  severity: high
+  expectation:
+    column: region
+    allowed_values:
+    - NA
+    - EMEA
+    - APAC
+    - UK
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Restricts region designation to only official regions, improving reporting
+    clarity.
+  ai_evidence_used: Top_values profiling for region yields exactly these four known
+    regions.
+- rule_id: T001
+  rule_type: date_not_in_future
+  severity: high
+  expectation:
+    column: createdAt
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Recording a risk estimation in the future is logically impossible
+    and indicates data errors.
+  ai_evidence_used: createdAt column is datetime; future values would invalidate the
+    record.
+- rule_id: R001
+  rule_type: range
+  severity: high
+  expectation:
+    column: var
+    min: 0.0
+    max: 69774.0
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Shortage value in dollars must be within observed bounds, as negative
+    or absurdly high values would indicate a data aberration.
+  ai_evidence_used: Profiling shows all values for var between 0.0 and 69774.0.
+- rule_id: R002
+  rule_type: range
+  severity: high
+  expectation:
+    column: shortage
+    min: 8.0
+    max: 31162.0
+  suggested_by: ai_patcher
+  ai_confidence: 1.0
+  ai_rationale: Shortage in units must be a reasonable non-negative value; profiling
+    shows all between 8 and 31162.
+  ai_evidence_used: Column minimum and maximum from profiling evidence.
+- rule_id: D003
+  rule_type: domain
+  severity: medium
+  expectation:
+    column: sourcePlant
+    allowed_values:
+    - '1090'
+    - '3020'
+    - '4010'
+    - '1160'
+    - '5400'
+    - '3010'
+    - '6010'
+    - '5050'
+    - '1010'
+    - '6030'
+  suggested_by: ai_patcher
+  ai_confidence: 0.95
+  ai_rationale: Restricts plant IDs to only those currently present, indicating valid
+    risks.
+  ai_evidence_used: Profiling shows top_values as set of known sourcePlants.
+- rule_id: A001
+  rule_type: anomaly_detection
+  severity: medium
+  expectation:
+    column: shortage
+    method: zscore
+    threshold: 3.0
+  suggested_by: ai_patcher
+  ai_confidence: 0.9
+  ai_rationale: Highlights unusual shortages likely to be outliers or data entry errors.
+  ai_evidence_used: Shortage shows high deviation; zscore is standard for anomaly
+    detection in this numeric context.
+- rule_id: A002
+  rule_type: anomaly_detection
+  severity: medium
+  expectation:
+    column: var_lag3_diff
+    method: iqr
+    threshold: 1.5
+  suggested_by: ai_patcher
+  ai_confidence: 0.9
+  ai_rationale: Detects outlier 3-month lagged differences in shortage estimates;
+    these may indicate sudden spikes or corrections.
+  ai_evidence_used: Profiling shows high spread; IQR captures moderately extreme values.

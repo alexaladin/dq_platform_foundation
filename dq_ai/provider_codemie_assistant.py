@@ -16,6 +16,15 @@ from dq_ai.types import AISuggestPatchResponse
 load_dotenv()
 
 
+def _json_default(obj: Any) -> Any:
+    """Fallback JSON serializer: converts Timestamps and dates to ISO strings."""
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "item"):
+        return obj.item()
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
 def _parse_json_response(content: str) -> dict[str, Any]:
     text = (content or "").strip()
     if text.startswith("```"):
@@ -155,7 +164,7 @@ class CodeMieAssistantProvider(AIProviderBase):
             "deterministic_context": deterministic_context,
         }
 
-        prompt = f"SYSTEM:\n{system}\n\nUSER:\n{json.dumps(user_payload, ensure_ascii=False)}"
+        prompt = f"SYSTEM:\n{system}\n\nUSER:\n{json.dumps(user_payload, ensure_ascii=False, default=_json_default)}"
 
         headers = {
             "Authorization": f"Bearer {token}",
